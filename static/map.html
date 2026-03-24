@@ -1,0 +1,1213 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>地面火点增强验证系统 v1.0</title>
+    
+    <!-- Leaflet CSS & JS -->
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin=""/>
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
+    
+    <style>
+        :root {
+            --primary: #27ae60;
+            --primary-hover: #219a52;
+            --bg-color: #f8f9fa;
+            --sidebar-bg: #ffffff;
+            --text-main: #2c3e50;
+            --text-muted: #7f8c8d;
+            --border-color: #e2e8f0;
+            --shadow-sm: 0 2px 4px rgba(0,0,0,0.05);
+            --shadow-md: 0 4px 6px rgba(0,0,0,0.07);
+            
+            --verdict-true: #e74c3c;
+            --verdict-false: #95a5a6;
+            --verdict-uncertain: #f39c12;
+            
+            --font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, "Noto Sans SC", sans-serif;
+        }
+
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+
+        body {
+            font-family: var(--font-family);
+            color: var(--text-main);
+            background: var(--bg-color);
+            display: flex;
+            height: 100vh;
+            overflow: hidden;
+        }
+
+        /* Sidebar Layout */
+        #sidebar {
+            width: 400px;
+            background: var(--sidebar-bg);
+            border-right: 1px solid var(--border-color);
+            display: flex;
+            flex-direction: column;
+            box-shadow: var(--shadow-md);
+            z-index: 1000;
+        }
+
+        .header {
+            background: #2c3e50;
+            color: white;
+            padding: 20px;
+            text-align: center;
+        }
+
+        .header h1 {
+            font-size: 1.25rem;
+            font-weight: 600;
+            letter-spacing: 0.5px;
+        }
+
+        .controls {
+            padding: 20px;
+            overflow-y: auto;
+            flex-shrink: 0;
+            border-bottom: 1px solid var(--border-color);
+            background: #fafafa;
+        }
+
+        .form-group {
+            margin-bottom: 15px;
+        }
+
+        .form-group label {
+            display: block;
+            font-size: 0.85rem;
+            font-weight: 500;
+            margin-bottom: 6px;
+            color: #34495e;
+        }
+
+        .form-control {
+            width: 100%;
+            padding: 10px;
+            border: 1px solid #cbd5e1;
+            border-radius: 6px;
+            font-size: 0.9rem;
+            transition: border-color 0.2s, box-shadow 0.2s;
+            font-family: var(--font-family);
+        }
+
+        .form-control:focus {
+            outline: none;
+            border-color: var(--primary);
+            box-shadow: 0 0 0 3px rgba(39, 174, 96, 0.15);
+        }
+        
+        textarea.form-control {
+            resize: vertical;
+            min-height: 80px;
+            font-family: monospace;
+            font-size: 0.8rem;
+        }
+
+        .grid-2 {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 10px;
+        }
+
+        .btn-group {
+            display: flex;
+            gap: 10px;
+            margin-top: 20px;
+        }
+
+        .btn {
+            padding: 10px 15px;
+            border: none;
+            border-radius: 6px;
+            font-size: 0.95rem;
+            font-weight: 500;
+            cursor: pointer;
+            transition: all 0.2s;
+            flex: 1;
+            text-align: center;
+        }
+
+        .btn-primary {
+            background: var(--primary);
+            color: white;
+        }
+
+        .btn-primary:hover {
+            background: var(--primary-hover);
+        }
+        
+        .btn-primary:disabled {
+            background: #95a5a6;
+            cursor: not-allowed;
+        }
+
+        .btn-outline {
+            background: transparent;
+            border: 1px solid var(--border-color);
+            color: var(--text-main);
+        }
+
+        .btn-outline:hover {
+            background: #f1f5f9;
+        }
+
+        .divider {
+            display: flex;
+            align-items: center;
+            text-align: center;
+            margin: 15px 0;
+            color: var(--text-muted);
+            font-size: 0.8rem;
+        }
+        .divider::before, .divider::after {
+            content: '';
+            flex: 1;
+            border-bottom: 1px solid var(--border-color);
+        }
+        .divider:not(:empty)::before { margin-right: .25em; }
+        .divider:not(:empty)::after { margin-left: .25em; }
+
+        /* Results Area */
+        #results-container {
+            flex: 1;
+            overflow-y: auto;
+            padding: 20px;
+            background: #f8f9fa;
+        }
+
+        .result-card {
+            background: white;
+            border-radius: 8px;
+            padding: 16px;
+            margin-bottom: 16px;
+            box-shadow: var(--shadow-sm);
+            border: 1px solid var(--border-color);
+            transition: transform 0.2s, box-shadow 0.2s;
+        }
+
+        .result-card:hover {
+            box-shadow: var(--shadow-md);
+            transform: translateY(-2px);
+        }
+
+        .result-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 12px;
+            padding-bottom: 10px;
+            border-bottom: 1px solid #f1f5f9;
+        }
+
+        .badge {
+            padding: 4px 8px;
+            border-radius: 4px;
+            font-size: 0.75rem;
+            font-weight: 600;
+            color: white;
+        }
+
+        .badge.true-fire { background: var(--verdict-true); }
+        .badge.false-positive { background: var(--verdict-false); }
+        .badge.uncertain { background: var(--verdict-uncertain); }
+
+        .confidence-box {
+            text-align: right;
+        }
+        
+        .confidence-score {
+            font-size: 1.25rem;
+            font-weight: 700;
+            color: var(--text-main);
+        }
+        
+        .sat-confidence {
+            font-size: 0.75rem;
+            color: var(--text-muted);
+            margin-top: 2px;
+        }
+
+        .summary-box {
+            background: #f8fafc;
+            border-left: 3px solid var(--primary);
+            padding: 10px 12px;
+            font-size: 0.85rem;
+            color: #475569;
+            margin-bottom: 12px;
+            border-radius: 0 4px 4px 0;
+            line-height: 1.4;
+        }
+
+        .details-section {
+            font-size: 0.8rem;
+            color: var(--text-muted);
+        }
+        
+        .details-section p {
+            margin-bottom: 6px;
+        }
+
+        .details-section strong {
+            color: #334155;
+            font-weight: 500;
+        }
+
+        /* Analysis sections (satellite vs ground) */
+        .analysis-section {
+            margin-top: 12px;
+            border-radius: 6px;
+            overflow: hidden;
+        }
+
+        .analysis-section-header {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            padding: 7px 10px;
+            font-size: 0.78rem;
+            font-weight: 600;
+            letter-spacing: 0.3px;
+            cursor: pointer;
+            user-select: none;
+        }
+
+        .analysis-section-header .toggle-icon {
+            margin-left: auto;
+            font-style: normal;
+            font-size: 0.75rem;
+            opacity: 0.7;
+        }
+
+        .analysis-section-body {
+            padding: 10px 12px;
+            font-size: 0.8rem;
+            line-height: 1.55;
+        }
+
+        .sat-section .analysis-section-header {
+            background: #eef2ff;
+            color: #3730a3;
+            border: 1px solid #c7d2fe;
+        }
+        .sat-section .analysis-section-body {
+            background: #f5f7ff;
+            border: 1px solid #c7d2fe;
+            border-top: none;
+            color: #374151;
+        }
+
+        .ground-section .analysis-section-header {
+            background: #f0fdf4;
+            color: #166534;
+            border: 1px solid #bbf7d0;
+        }
+        .ground-section .analysis-section-body {
+            background: #f7fef9;
+            border: 1px solid #bbf7d0;
+            border-top: none;
+            color: #374151;
+        }
+
+        .analysis-row {
+            display: flex;
+            align-items: flex-start;
+            margin-bottom: 5px;
+            gap: 6px;
+        }
+        .analysis-row:last-child { margin-bottom: 0; }
+        .analysis-row .row-label {
+            flex-shrink: 0;
+            width: 90px;
+            font-weight: 500;
+            color: #64748b;
+        }
+        .analysis-row .row-val { flex: 1; word-break: break-word; }
+
+        .sub-reasons {
+            list-style: none;
+            padding: 0;
+            margin: 0;
+        }
+        .sub-reasons li {
+            padding: 3px 0 3px 12px;
+            position: relative;
+            font-size: 0.78rem;
+            color: #475569;
+            line-height: 1.4;
+        }
+        .sub-reasons li::before {
+            content: '›';
+            position: absolute;
+            left: 0;
+            color: #94a3b8;
+        }
+
+        .sat-badge {
+            display: inline-block;
+            background: #eef2ff;
+            color: #3730a3;
+            border: 1px solid #c7d2fe;
+            border-radius: 3px;
+            font-size: 0.7rem;
+            font-weight: 600;
+            padding: 1px 5px;
+            vertical-align: middle;
+        }
+
+        .ground-badge {
+            display: inline-block;
+            background: #f0fdf4;
+            color: #166534;
+            border: 1px solid #bbf7d0;
+            border-radius: 3px;
+            font-size: 0.7rem;
+            font-weight: 600;
+            padding: 1px 5px;
+            vertical-align: middle;
+        }
+
+        .chip-row {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 4px;
+            margin-top: 3px;
+        }
+        .chip {
+            padding: 2px 7px;
+            border-radius: 10px;
+            font-size: 0.72rem;
+            font-weight: 500;
+        }
+        .chip-ok { background: #dcfce7; color: #15803d; }
+        .chip-warn { background: #fef3c7; color: #92400e; }
+        .chip-danger { background: #fee2e2; color: #b91c1c; }
+
+        /* Confidence bar */
+        .conf-bar-wrap {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            margin-top: 2px;
+        }
+        .conf-bar {
+            flex: 1;
+            height: 6px;
+            background: #e2e8f0;
+            border-radius: 3px;
+            overflow: hidden;
+        }
+        .conf-bar-fill {
+            height: 100%;
+            border-radius: 3px;
+            transition: width 0.4s ease;
+        }
+        .conf-bar-fill.high { background: #22c55e; }
+        .conf-bar-fill.mid { background: #f59e0b; }
+        .conf-bar-fill.low { background: #94a5a8; }
+        .conf-bar-label { font-size: 0.78rem; font-weight: 600; width: 36px; text-align: right; flex-shrink: 0; }
+
+        /* Heat source classification section */
+        .heat-section .analysis-section-header {
+            background: #fff7ed;
+            color: #92400e;
+            border: 1px solid #fed7aa;
+        }
+        .heat-section .analysis-section-body {
+            background: #fffbf5;
+            border: 1px solid #fed7aa;
+            border-top: none;
+            color: #374151;
+        }
+        .heat-bar-row {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            margin-bottom: 4px;
+            font-size: 0.76rem;
+        }
+        .heat-bar-row:last-child { margin-bottom: 0; }
+        .heat-bar-label { width: 68px; flex-shrink: 0; color: #64748b; }
+        .heat-bar-track {
+            flex: 1;
+            height: 8px;
+            background: #f1f5f9;
+            border-radius: 4px;
+            overflow: hidden;
+        }
+        .heat-bar-fill {
+            height: 100%;
+            border-radius: 4px;
+            transition: width 0.4s ease;
+        }
+        .heat-bar-pct { width: 34px; text-align: right; font-weight: 600; color: #475569; flex-shrink: 0; }
+        .heat-top-chip {
+            display: inline-flex;
+            align-items: center;
+            gap: 4px;
+            padding: 2px 8px;
+            border-radius: 10px;
+            font-size: 0.72rem;
+            font-weight: 600;
+            background: #fff7ed;
+            color: #92400e;
+            border: 1px solid #fed7aa;
+            vertical-align: middle;
+            margin-top: 4px;
+        }
+
+        /* Map Area */
+        #map {
+            flex: 1;
+            height: 100%;
+            background: #e5e5e5;
+            z-index: 1;
+        }
+        
+        /* Custom Popup Styles */
+        .leaflet-popup-content-wrapper {
+            border-radius: 8px;
+            box-shadow: 0 4px 15px rgba(0,0,0,0.1);
+        }
+        .leaflet-popup-content {
+            margin: 15px;
+            font-family: var(--font-family);
+        }
+        .popup-title {
+            font-weight: 600;
+            font-size: 1rem;
+            margin-bottom: 8px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        .popup-desc {
+            font-size: 0.85rem;
+            color: #475569;
+            margin-bottom: 8px;
+            line-height: 1.4;
+        }
+        .popup-meta {
+            font-size: 0.75rem;
+            color: #94a3b8;
+            border-top: 1px solid #f1f5f9;
+            padding-top: 8px;
+            margin-top: 8px;
+        }
+        
+        /* Loading Overlay */
+        #loading {
+            position: absolute;
+            top: 0; left: 0; right: 0; bottom: 0;
+            background: rgba(255,255,255,0.8);
+            display: none;
+            justify-content: center;
+            align-items: center;
+            z-index: 2000;
+            flex-direction: column;
+        }
+        
+        .spinner {
+            width: 40px;
+            height: 40px;
+            border: 4px solid #f3f3f3;
+            border-top: 4px solid var(--primary);
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+            margin-bottom: 15px;
+        }
+        
+        @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+    </style>
+</head>
+<body>
+
+    <div id="sidebar">
+        <div class="header">
+            <h1>🔥 地面增强验证</h1>
+        </div>
+        
+        <div class="controls">
+            <div class="form-group">
+                <label>星上验证结果 (JSON)</label>
+                <textarea id="jsonInput" class="form-control" placeholder="在此粘贴星上验证系统输出的完整 JSON 结果 (可选)..."></textarea>
+            </div>
+            
+            <div class="divider">或手动输入</div>
+            
+            <div class="grid-2">
+                <div class="form-group">
+                    <label>纬度 (Latitude)</label>
+                    <input type="number" id="lat" class="form-control" step="0.000001" placeholder="例如: 28.5">
+                </div>
+                <div class="form-group">
+                    <label>经度 (Longitude)</label>
+                    <input type="number" id="lon" class="form-control" step="0.000001" placeholder="例如: 116.3">
+                </div>
+            </div>
+            
+            <div class="grid-2">
+                <div class="form-group">
+                    <label>卫星 (Satellite)</label>
+                    <input type="text" id="satellite" class="form-control" placeholder="例如: VIIRS" value="VIIRS">
+                </div>
+                <div class="form-group">
+                    <label>置信度 (0-100)</label>
+                    <input type="number" id="confidence" class="form-control" placeholder="80" value="80">
+                </div>
+            </div>
+            
+            <div class="grid-2">
+                <div class="form-group">
+                    <label>亮温 (Brightness)</label>
+                    <input type="number" id="brightness" class="form-control" step="0.1" placeholder="340.0" value="340.0">
+                </div>
+                <div class="form-group">
+                    <label>FRP</label>
+                    <input type="number" id="frp" class="form-control" step="0.1" placeholder="15.2" value="15.2">
+                </div>
+            </div>
+            
+            <div class="form-group">
+                <label>采集时间 (可选)</label>
+                <input type="datetime-local" id="acq_time" class="form-control">
+            </div>
+
+            <div class="btn-group">
+                <button id="btn-submit" class="btn btn-primary" onclick="submitEnhance()">开始增强验证</button>
+                <button class="btn btn-outline" onclick="fillDemo()">批量示例</button>
+            </div>
+        </div>
+        
+        <div id="results-container">
+            <div style="text-align: center; color: var(--text-muted); padding: 40px 20px; font-size: 0.9rem;">
+                输入数据并点击“开始增强验证”<br>查看地面结合验证结果
+            </div>
+        </div>
+    </div>
+    
+    <div id="map"></div>
+    
+    <div id="loading">
+        <div class="spinner"></div>
+        <div style="color: var(--text-main); font-weight: 500;">增强验证中，请稍候...</div>
+    </div>
+
+    <script>
+        // Initialize Map
+        const map = L.map('map').setView([35.0, 105.0], 5);
+        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+            attribution: '&copy; OpenStreetMap contributors'
+        }).addTo(map);
+
+        let mapMarkers = [];
+
+        function clearMap() {
+            mapMarkers.forEach(m => map.removeLayer(m));
+            mapMarkers = [];
+        }
+
+        function fillDemo() {
+            // Fill manual fields
+            document.getElementById('lat').value = "28.5";
+            document.getElementById('lon').value = "116.3";
+            document.getElementById('satellite').value = "VIIRS";
+            document.getElementById('brightness').value = "340";
+            document.getElementById('frp').value = "15.2";
+            document.getElementById('confidence').value = "80";
+            
+            // Fill JSON
+            const demoJson = {
+                "input_point": {
+                    "latitude": 28.5,
+                    "longitude": 116.3,
+                    "satellite": "VIIRS",
+                    "brightness": 342.5,
+                    "frp": 15.2,
+                    "confidence": 80,
+                    "acquisition_time": null
+                },
+                "verdict": "UNCERTAIN",
+                "final_confidence": 0.62,
+                "reasons": [
+                    "地物类型为草地，属于高火灾风险区域",
+                    "高亮温 (342.5K > 340K)，为活跃火点增加置信度"
+                ],
+                "summary": "星上主判结果为不确定，最终置信度 62.0%，建议地面核实。",
+                "coordinate_correction": {
+                    "original_lat": 28.5,
+                    "original_lon": 116.3,
+                    "corrected_lat": 28.5012,
+                    "corrected_lon": 116.3008,
+                    "offset_m": 145.2,
+                    "correction_applied": true,
+                    "reason": "原始坐标落在建筑区，已修正至最近草地"
+                },
+                "landcover": {
+                    "class_code": 30,
+                    "class_name": "草地",
+                    "likelihood_ratio": 3.0,
+                    "description": "天然草地，火灾风险较高"
+                },
+                "false_positive": {
+                    "flags": [
+                        {"detector": "水体", "triggered": false, "penalty": 0.0, "detail": ""},
+                        {"detector": "城市热岛", "triggered": false, "penalty": 0.0, "detail": ""},
+                        {"detector": "太阳耀斑", "triggered": false, "penalty": 0.0, "detail": "太阳天顶角 42.3°，无耀斑风险"},
+                        {"detector": "海岸反射", "triggered": false, "penalty": 0.0, "detail": ""}
+                    ],
+                    "total_penalty": 0.0,
+                    "is_likely_false_positive": false
+                },
+                "environmental": {
+                    "is_daytime": true,
+                    "solar_zenith_angle": 42.3,
+                    "fire_season_factor": 1.2,
+                    "env_score": 0.15,
+                    "detail": "白天观测，春季火灾高发期，环境评分适中"
+                },
+                "confidence_breakdown": {
+                    "initial_confidence": 0.5,
+                    "landcover_contribution": 1.099,
+                    "environmental_contribution": 0.03,
+                    "brightness_bonus": 0.3,
+                    "frp_bonus": 0.0,
+                    "false_positive_penalty": 0.0,
+                    "final_confidence": 0.62
+                },
+                "processing_time_ms": 45.2
+            };
+            
+            document.getElementById('jsonInput').value = JSON.stringify(demoJson, null, 2);
+        }
+
+        async function submitEnhance() {
+            const btnSubmit = document.getElementById('btn-submit');
+            const loading = document.getElementById('loading');
+            const resultsContainer = document.getElementById('results-container');
+            const jsonInput = document.getElementById('jsonInput').value.trim();
+            
+            let requestBody = { results: [] };
+            
+            if (jsonInput) {
+                try {
+                    const parsed = JSON.parse(jsonInput);
+                    if (Array.isArray(parsed)) {
+                        requestBody.results = parsed;
+                    } else if (parsed.results && Array.isArray(parsed.results)) {
+                        requestBody = parsed;
+                    } else {
+                        requestBody.results = [parsed];
+                    }
+                } catch (e) {
+                    alert("JSON 解析错误，请检查输入格式。");
+                    return;
+                }
+            } else {
+                const lat = parseFloat(document.getElementById('lat').value);
+                const lon = parseFloat(document.getElementById('lon').value);
+                if (isNaN(lat) || isNaN(lon)) {
+                    alert("请填写有效的经纬度，或粘贴 JSON 结果。");
+                    return;
+                }
+                
+                const confidence = parseFloat(document.getElementById('confidence').value) || 50;
+                
+                requestBody.results.push({
+                    input_point: {
+                        latitude: lat,
+                        longitude: lon,
+                        satellite: document.getElementById('satellite').value || "UNKNOWN",
+                        brightness: parseFloat(document.getElementById('brightness').value) || 0,
+                        frp: parseFloat(document.getElementById('frp').value) || 0,
+                        confidence: confidence,
+                        acquisition_time: document.getElementById('acq_time').value || null
+                    },
+                    verdict: "UNCERTAIN",
+                    final_confidence: confidence / 100.0,
+                    reasons: ["手动输入火点，使用默认星上置信度"],
+                    summary: "手动输入火点，待地面增强验证",
+                    coordinate_correction: null,
+                    landcover: null,
+                    false_positive: null,
+                    environmental: null,
+                    confidence_breakdown: null,
+                    processing_time_ms: 0
+                });
+            }
+
+            btnSubmit.disabled = true;
+            btnSubmit.innerText = "增强验证中...";
+            loading.style.display = "flex";
+            clearMap();
+
+            try {
+                const response = await fetch('/api/enhance', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(requestBody)
+                });
+
+                if (!response.ok) {
+                    throw new Error(`API 请求失败: ${response.status}`);
+                }
+
+                const data = await response.json();
+                renderResults(data);
+                
+            } catch (error) {
+                resultsContainer.innerHTML = `<div style="color: #e74c3c; padding: 20px;">错误: ${error.message}</div>`;
+            } finally {
+                btnSubmit.disabled = false;
+                btnSubmit.innerText = "开始增强验证";
+                loading.style.display = "none";
+            }
+        }
+        
+        function getVerdictDetails(verdict) {
+            switch(verdict) {
+                case 'TRUE_FIRE': return { label: '真实火点', class: 'true-fire', color: '#e74c3c' };
+                case 'FALSE_POSITIVE': return { label: '误报 (假阳性)', class: 'false-positive', color: '#95a5a6' };
+                default: return { label: '不确定', class: 'uncertain', color: '#f39c12' };
+            }
+        }
+
+        function confBarHtml(conf) {
+            const pct = Math.round(conf * 100);
+            const cls = pct >= 75 ? 'high' : pct >= 35 ? 'mid' : 'low';
+            return `<div class="conf-bar-wrap">
+                <div class="conf-bar"><div class="conf-bar-fill ${cls}" style="width:${pct}%"></div></div>
+                <span class="conf-bar-label" style="color:${cls==='high'?'#15803d':cls==='mid'?'#92400e':'#64748b'}">${pct}%</span>
+            </div>`;
+        }
+
+        function toggleSection(headerEl) {
+            const body = headerEl.nextElementSibling;
+            const icon = headerEl.querySelector('.toggle-icon');
+            const collapsed = body.style.display === 'none';
+            body.style.display = collapsed ? '' : 'none';
+            icon.textContent = collapsed ? '▲' : '▼';
+        }
+
+        function buildSatelliteSection(satData) {
+            const pt = satData.input_point;
+            const rows = [];
+
+            // Coordinate
+            const cc = satData.coordinate_correction;
+            if (cc) {
+                const lat = cc.corrected_lat !== undefined ? cc.corrected_lat : pt.latitude;
+                const lon = cc.corrected_lon !== undefined ? cc.corrected_lon : pt.longitude;
+                const applied = cc.correction_applied;
+                rows.push(`<div class="analysis-row">
+                    <span class="row-label">坐标修正</span>
+                    <span class="row-val">${applied
+                        ? `已修正，偏移 <strong>${cc.offset_m != null ? cc.offset_m.toFixed(0) : '-'} m</strong>
+                           <br><span style="font-size:0.75rem;color:#64748b">修正后: ${lat.toFixed(5)}, ${lon.toFixed(5)}</span>`
+                        : '未进行修正'}</span>
+                </div>`);
+            }
+
+            // Land cover
+            const lc = satData.landcover;
+            if (lc) {
+                const lr = lc.likelihood_ratio;
+                const chipCls = lr >= 2 ? 'chip-danger' : lr >= 1 ? 'chip-warn' : 'chip-ok';
+                rows.push(`<div class="analysis-row">
+                    <span class="row-label">地物类型</span>
+                    <span class="row-val">
+                        ${lc.class_name || '-'}
+                        <span class="chip ${chipCls}" style="margin-left:4px">似然比 ${lr !== undefined ? lr.toFixed(1) : '-'}</span>
+                        ${lc.description ? `<br><span style="font-size:0.75rem;color:#64748b">${lc.description}</span>` : ''}
+                    </span>
+                </div>`);
+            }
+
+            // Environmental
+            const env = satData.environmental;
+            if (env) {
+                const dayChip = env.is_daytime
+                    ? `<span class="chip chip-warn">白天</span>`
+                    : `<span class="chip chip-ok">夜间</span>`;
+                rows.push(`<div class="analysis-row">
+                    <span class="row-label">环境因素</span>
+                    <span class="row-val">
+                        ${dayChip}
+                        <span class="chip" style="background:#f1f5f9;color:#475569">太阳天顶角 ${env.solar_zenith_angle !== undefined ? env.solar_zenith_angle.toFixed(1) : '-'}°</span>
+                        <span class="chip" style="background:#f1f5f9;color:#475569">季节因子 ${env.fire_season_factor !== undefined ? env.fire_season_factor.toFixed(2) : '-'}</span>
+                        ${env.detail ? `<br><span style="font-size:0.75rem;color:#64748b">${env.detail}</span>` : ''}
+                    </span>
+                </div>`);
+            }
+
+            // False positive
+            const fp = satData.false_positive;
+            if (fp && fp.flags && fp.flags.length > 0) {
+                const triggered = fp.flags.filter(f => f.triggered);
+                const chips = fp.flags.map(f =>
+                    `<span class="chip ${f.triggered ? 'chip-danger' : 'chip-ok'}">${f.detector}${f.triggered ? ' ⚠' : ' ✓'}</span>`
+                ).join('');
+                rows.push(`<div class="analysis-row">
+                    <span class="row-label">假阳性检测</span>
+                    <span class="row-val">
+                        <div class="chip-row">${chips}</div>
+                        ${triggered.length > 0
+                            ? `<div style="margin-top:4px;font-size:0.75rem;color:#b91c1c">触发: ${triggered.map(f=>f.detail||f.detector).join('；')}</div>`
+                            : ''}
+                    </span>
+                </div>`);
+            }
+
+            // Confidence breakdown
+            const cb = satData.confidence_breakdown;
+            if (cb) {
+                const bRows = [
+                    ['初始置信度', cb.initial_confidence],
+                    ['地物贡献', cb.landcover_contribution],
+                    ['环境贡献', cb.environmental_contribution],
+                    ['亮温加成', cb.brightness_bonus],
+                    ['FRP加成', cb.frp_bonus],
+                    ['假阳性惩罚', cb.false_positive_penalty],
+                ].filter(([, v]) => v !== undefined && v !== null && v !== 0)
+                 .map(([k, v]) => `<span style="color:#64748b">${k}</span> <strong>${v > 0 ? '+' : ''}${typeof v === 'number' ? v.toFixed(3) : v}</strong>`)
+                 .join('<span style="color:#cbd5e1;margin:0 3px">·</span>');
+                rows.push(`<div class="analysis-row">
+                    <span class="row-label">置信度分解</span>
+                    <span class="row-val" style="font-size:0.76rem;line-height:1.7">${bRows}</span>
+                </div>`);
+            }
+
+            // Sensor metadata
+            const sensorParts = [];
+            if (pt.satellite) sensorParts.push(`卫星: <strong>${pt.satellite}</strong>`);
+            if (pt.brightness != null) sensorParts.push(`亮温: <strong>${pt.brightness} K</strong>`);
+            if (pt.frp != null) sensorParts.push(`FRP: <strong>${pt.frp} MW</strong>`);
+            if (pt.confidence != null) sensorParts.push(`原始置信度: <strong>${pt.confidence}%</strong>`);
+            if (pt.acquisition_time) sensorParts.push(`观测时间: <strong>${new Date(pt.acquisition_time).toLocaleString('zh-CN')}</strong>`);
+            if (sensorParts.length > 0) {
+                rows.push(`<div class="analysis-row">
+                    <span class="row-label">传感器参数</span>
+                    <span class="row-val" style="font-size:0.76rem;line-height:1.8">${sensorParts.join('<br>')}</span>
+                </div>`);
+            }
+
+            // Reasons
+            if (satData.reasons && satData.reasons.length > 0) {
+                const items = satData.reasons.map(r => `<li>${r}</li>`).join('');
+                rows.push(`<div class="analysis-row">
+                    <span class="row-label">判断依据</span>
+                    <span class="row-val"><ul class="sub-reasons">${items}</ul></span>
+                </div>`);
+            }
+
+            // Satellite confidence bar
+            const satConf = satData.final_confidence;
+            rows.push(`<div class="analysis-row">
+                <span class="row-label">星上置信度</span>
+                <span class="row-val">${confBarHtml(satConf)}</span>
+            </div>`);
+
+            const satVDetails = getVerdictDetails(satData.verdict);
+            const summaryHtml = satData.summary
+                ? `<div style="padding:8px 0 10px;font-size:0.8rem;color:#3730a3;line-height:1.5;border-bottom:1px dashed #c7d2fe;margin-bottom:8px">
+                      <span class="sat-badge">星上结论</span>&nbsp;
+                      <span class="badge ${satVDetails.class}" style="font-size:0.7rem">${satVDetails.label}</span>&nbsp;
+                      ${satData.summary}
+                   </div>`
+                : '';
+
+            return `<div class="analysis-section sat-section">
+                <div class="analysis-section-header" onclick="toggleSection(this)">
+                    🛰 星上分析
+                    <span style="margin-left:8px;opacity:0.7;font-weight:400;font-size:0.72rem">• ${satVDetails.label} · ${(satData.final_confidence*100).toFixed(0)}%</span>
+                    <span class="toggle-icon">▲</span>
+                </div>
+                <div class="analysis-section-body">
+                    ${summaryHtml}
+                    ${rows.join('')}
+                </div>
+            </div>`;
+        }
+
+        const HEAT_COLORS = {
+            vegetation_fire:      '#e74c3c',
+            agricultural_burning: '#f39c12',
+            industrial_heat:      '#3498db',
+            urban_heat_island:    '#9b59b6',
+            sun_glint:            '#f1c40f',
+            water_reflection:     '#2980b9',
+            coastal_reflection:   '#1abc9c',
+            wetland_fire:         '#e67e22',
+        };
+
+        function buildHeatSourceSection(hsc) {
+            if (!hsc) return '';
+
+            const bars = hsc.ranked_sources.map(src => {
+                const pct = Math.round(src.probability * 100);
+                const color = HEAT_COLORS[src.type] || '#94a3b8';
+                const isTop = src.type === hsc.top_type;
+                return `<div class="heat-bar-row">
+                    <span class="heat-bar-label" style="${isTop ? 'color:#92400e;font-weight:600' : ''}">${src.label_zh}</span>
+                    <div class="heat-bar-track">
+                        <div class="heat-bar-fill" style="width:${pct}%;background:${color};opacity:${isTop ? 1 : 0.55}"></div>
+                    </div>
+                    <span class="heat-bar-pct" style="${isTop ? 'color:#92400e' : ''}">${pct}%</span>
+                </div>`;
+            }).join('');
+
+            const areaStr = hsc.estimated_area_km2 >= 1
+                ? `${hsc.estimated_area_km2.toFixed(3)} km²`
+                : `${(hsc.estimated_area_km2 * 1e6).toFixed(0)} m²`;
+
+            return `<div class="analysis-section heat-section">
+                <div class="analysis-section-header" onclick="toggleSection(this)">
+                    🌡 热源类型分类
+                    <span style="margin-left:8px;opacity:0.7;font-weight:400;font-size:0.72rem">• ${hsc.top_label_zh} · ${Math.round(hsc.top_probability * 100)}%</span>
+                    <span class="toggle-icon">▲</span>
+                </div>
+                <div class="analysis-section-body">
+                    <div class="analysis-row" style="margin-bottom:10px">
+                        <span class="row-label">概率排名</span>
+                        <span class="row-val">${bars}</span>
+                    </div>
+                    <div class="analysis-row">
+                        <span class="row-label">📐 估算面积</span>
+                        <span class="row-val">
+                            <strong>${areaStr}</strong>
+                            <br><span style="font-size:0.73rem;color:#94a3b8">${hsc.area_basis}</span>
+                        </span>
+                    </div>
+                </div>
+            </div>`;
+        }
+
+        function buildGroundSection(res) {
+            const rows = [];
+
+            // Geocoding
+            if (res.geocoding_address) {
+                rows.push(`<div class="analysis-row">
+                    <span class="row-label">📍 位置</span>
+                    <span class="row-val">${res.geocoding_address}</span>
+                </div>`);
+            }
+
+            // Historical
+            const hist = res.historical;
+            if (hist) {
+                const scoreChip = hist.score > 0
+                    ? `<span class="chip chip-danger">历史支持 +${hist.score.toFixed(2)}</span>`
+                    : hist.score < 0
+                        ? `<span class="chip chip-ok">历史否定 ${hist.score.toFixed(2)}</span>`
+                        : `<span class="chip" style="background:#f1f5f9;color:#64748b">历史中性</span>`;
+                const dist = hist.nearest_distance_m != null
+                    ? (hist.nearest_distance_m >= 1000
+                        ? `${(hist.nearest_distance_m/1000).toFixed(2)} km`
+                        : `${hist.nearest_distance_m.toFixed(0)} m`)
+                    : '-';
+                rows.push(`<div class="analysis-row">
+                    <span class="row-label">📜 历史火情</span>
+                    <span class="row-val">
+                        ${scoreChip}
+                        <span style="margin-left:4px">共 <strong>${hist.nearby_fire_count}</strong> 次，最近 <strong>${dist}</strong></span>
+                        ${hist.detail ? `<br><span style="font-size:0.75rem;color:#64748b">${hist.detail}</span>` : ''}
+                    </span>
+                </div>`);
+            }
+
+            // Industrial false positive
+            const ind = res.industrial_fp;
+            if (ind && ind.flag) {
+                const triggered = ind.flag.triggered;
+                rows.push(`<div class="analysis-row">
+                    <span class="row-label">🏭 工业热源</span>
+                    <span class="row-val">
+                        <span class="chip ${triggered ? 'chip-danger' : 'chip-ok'}">${triggered ? '检测到工业热源 ⚠' : '未检测到工业热源 ✓'}</span>
+                        ${ind.flag.detail ? `<br><span style="font-size:0.75rem;color:#64748b">${ind.flag.detail}</span>` : ''}
+                    </span>
+                </div>`);
+            }
+
+            // Ground confidence breakdown
+            const gcb = res.ground_confidence_breakdown;
+            if (gcb) {
+                const delta = gcb.final_confidence - gcb.satellite_confidence;
+                const deltaStr = `${delta >= 0 ? '+' : ''}${(delta * 100).toFixed(1)}%`;
+                const deltaColor = delta > 0.01 ? '#15803d' : delta < -0.01 ? '#b91c1c' : '#64748b';
+                rows.push(`<div class="analysis-row">
+                    <span class="row-label">置信度变化</span>
+                    <span class="row-val" style="font-size:0.76rem">
+                        星上 ${(gcb.satellite_confidence*100).toFixed(0)}%
+                        → 地面 ${(gcb.final_confidence*100).toFixed(0)}%
+                        &nbsp;<span style="font-weight:600;color:${deltaColor}">${deltaStr}</span>
+                        ${gcb.historical_contribution !== 0 ? `<br><span style="color:#64748b">历史贡献 ${gcb.historical_contribution > 0 ? '+' : ''}${gcb.historical_contribution.toFixed(3)}</span>` : ''}
+                        ${gcb.industrial_penalty !== 0 ? `&nbsp;<span style="color:#64748b">工业惩罚 −${gcb.industrial_penalty.toFixed(3)}</span>` : ''}
+                    </span>
+                </div>`);
+            }
+
+            // Ground confidence bar
+            rows.push(`<div class="analysis-row">
+                <span class="row-label">地面置信度</span>
+                <span class="row-val">${confBarHtml(res.ground_confidence)}</span>
+            </div>`);
+
+            // Ground reasons (ground-specific only — prefixed with [地面增强])
+            const groundReasons = (res.ground_reasons || []).filter(r => r.includes('[地面增强]'));
+            if (groundReasons.length > 0) {
+                const items = groundReasons.map(r => `<li>${r}</li>`).join('');
+                rows.push(`<div class="analysis-row">
+                    <span class="row-label">增强依据</span>
+                    <span class="row-val"><ul class="sub-reasons">${items}</ul></span>
+                </div>`);
+            }
+
+            // Processing time
+            rows.push(`<div class="analysis-row">
+                <span class="row-label">⏱ 耗时</span>
+                <span class="row-val" style="color:#64748b">${res.processing_time_ms.toFixed(0)} ms</span>
+            </div>`);
+
+            const gVDetails = getVerdictDetails(res.ground_verdict);
+            const summaryHtml = res.ground_summary
+                ? `<div style="padding:8px 0 10px;font-size:0.8rem;color:#166534;line-height:1.5;border-bottom:1px dashed #bbf7d0;margin-bottom:8px">
+                      <span class="ground-badge">地面结论</span>&nbsp;
+                      <span class="badge ${gVDetails.class}" style="font-size:0.7rem">${gVDetails.label}</span>&nbsp;
+                      ${res.ground_summary}
+                   </div>`
+                : '';
+
+            return `<div class="analysis-section ground-section">
+                <div class="analysis-section-header" onclick="toggleSection(this)">
+                    🌍 地面增强分析
+                    <span style="margin-left:8px;opacity:0.7;font-weight:400;font-size:0.72rem">• ${gVDetails.label} · ${(res.ground_confidence*100).toFixed(0)}%</span>
+                    <span class="toggle-icon">▲</span>
+                </div>
+                <div class="analysis-section-body">
+                    ${summaryHtml}
+                    ${rows.join('')}
+                </div>
+            </div>`;
+        }
+
+        function renderResults(data) {
+            const container = document.getElementById('results-container');
+            container.innerHTML = '';
+            
+            if (!data.results || data.results.length === 0) {
+                container.innerHTML = '<div style="padding: 20px; color: #7f8c8d;">无返回结果</div>';
+                return;
+            }
+
+            const bounds = L.latLngBounds();
+
+            data.results.forEach((res, index) => {
+                const satData = res.satellite_result;
+                const pt = satData.input_point;
+                const gVDetails = getVerdictDetails(res.ground_verdict);
+                const sVDetails = getVerdictDetails(satData.verdict);
+                
+                // Use corrected coords if available
+                const finalLat = satData.coordinate_correction ? satData.coordinate_correction.corrected_lat : pt.latitude;
+                const finalLon = satData.coordinate_correction ? satData.coordinate_correction.corrected_lon : pt.longitude;
+                
+                bounds.extend([finalLat, finalLon]);
+
+                const card = document.createElement('div');
+                card.className = 'result-card';
+
+                // Check if verdicts differ
+                const verdictDiffHtml = satData.verdict !== res.ground_verdict
+                    ? `<div style="margin-top:6px;font-size:0.72rem;color:#92400e;background:#fef3c7;border-radius:4px;padding:3px 7px;display:inline-block">
+                          ⚡ 地面判定与星上不同：${sVDetails.label} → ${gVDetails.label}
+                       </div>`
+                    : '';
+
+                const hsc = res.heat_source_classification;
+                const heatChipHtml = hsc
+                    ? `<span class="heat-top-chip">🌡 ${hsc.top_label_zh} ${Math.round(hsc.top_probability * 100)}%</span>`
+                    : '';
+
+                card.innerHTML = `
+                    <div class="result-header">
+                        <div>
+                            <span class="badge ${gVDetails.class}">${gVDetails.label}</span>
+                            <span class="badge ${sVDetails.class}" style="opacity:0.55;margin-left:5px;font-size:0.68rem">星: ${sVDetails.label}</span>
+                            <div style="font-size: 0.75rem; color: #7f8c8d; margin-top: 5px;">
+                                ${finalLat.toFixed(4)}, ${finalLon.toFixed(4)}
+                                ${res.geocoding_address ? `&nbsp;·&nbsp;${res.geocoding_address}` : ''}
+                            </div>
+                            ${verdictDiffHtml}
+                            ${heatChipHtml}
+                        </div>
+                        <div class="confidence-box">
+                            <div class="confidence-score">${(res.ground_confidence * 100).toFixed(0)}%</div>
+                            <div class="sat-confidence">🛰 星上: ${(satData.final_confidence * 100).toFixed(0)}%</div>
+                        </div>
+                    </div>
+
+                    ${buildSatelliteSection(satData)}
+                    ${buildGroundSection(res)}
+                    ${buildHeatSourceSection(hsc)}
+                `;
+                
+                container.appendChild(card);
+
+                // Map Marker
+                const marker = L.circleMarker([finalLat, finalLon], {
+                    radius: 8,
+                    fillColor: gVDetails.color,
+                    color: '#fff',
+                    weight: 2,
+                    opacity: 1,
+                    fillOpacity: 0.8
+                }).addTo(map);
+                
+                // Correction Line
+                if (satData.coordinate_correction && satData.coordinate_correction.correction_applied) {
+                    const line = L.polyline([
+                        [pt.latitude, pt.longitude],
+                        [finalLat, finalLon]
+                    ], { color: '#3498db', weight: 2, dashArray: '5, 5' }).addTo(map);
+                    mapMarkers.push(line);
+                }
+
+                const hscAreaStr = hsc
+                    ? (hsc.estimated_area_km2 >= 1
+                        ? hsc.estimated_area_km2.toFixed(2) + ' km²'
+                        : (hsc.estimated_area_km2 * 1e6).toFixed(0) + ' m²')
+                    : '';
+
+                const popupContent = `
+                    <div class="popup-title">
+                        <span class="badge ${gVDetails.class}">${gVDetails.label}</span>
+                        ${(res.ground_confidence * 100).toFixed(0)}%
+                    </div>
+                    <div class="popup-desc" style="margin-bottom:5px">
+                        <span class="ground-badge">地面</span> ${res.ground_summary || ''}
+                    </div>
+                    <div class="popup-desc">
+                        <span class="sat-badge">星上</span> ${satData.summary || ''}
+                    </div>
+                    ${hsc ? `<div class="popup-meta">🌡 热源: <strong>${hsc.top_label_zh}</strong> ${Math.round(hsc.top_probability * 100)}% &nbsp;·&nbsp; 面积 ${hscAreaStr}</div>` : ''}
+                    ${res.geocoding_address ? `<div class="popup-meta">📍 ${res.geocoding_address}</div>` : ''}
+                `;
+                
+                marker.bindPopup(popupContent);
+                mapMarkers.push(marker);
+            });
+
+            if (data.results.length > 0) {
+                map.fitBounds(bounds, { padding: [50, 50], maxZoom: 12 });
+            }
+        }
+    </script>
+</body>
+</html>
