@@ -10,13 +10,14 @@
 - **历史火点验证** — NASA FIRMS 近期火灾记录查询
 - **工业设施检测** — OSM Overpass 工业热源假阳性排查
 - **反向地理编码** — Nominatim 获取可读地址
+- **热源类型分类** — 8 类热源（植被火灾、农业焚烧、工业热源等）概率排名 + 异常面积估算
 - **Leaflet.js 交互式前端** — 地图可视化，支持 JSON 输入和手动输入
 - **SQLite 持久化** — 增强结果入库，可查询历史记录
 - **LRU 缓存** — FIRMS 查询结果缓存，减少重复请求
 
 ## 系统架构
 
-```
+```text
 星上系统输出 (JSON)
         |
         v
@@ -35,6 +36,10 @@
         |   +-- 地面判定
         |   +-- 地面原因生成 ("[地面增强]" 前缀)
         |
+        +-- 分类 (纯计算，无 I/O)
+        |   +-- 热源类型分类 (8 类, softmax)
+        |   +-- 异常面积估算
+        |
         +-- 输出
             +-- SQLite 持久化
             +-- 返回增强结果
@@ -42,12 +47,12 @@
 
 ## 置信度算法
 
-```
+```text
 logit(P_ground) = logit(P_satellite) + beta_hist * hist_score - industrial_penalty
 ```
 
 | 参数 | 说明 | 默认值 |
-|------|------|--------|
+| --- | --- | --- |
 | P_satellite | 星上最终置信度 (直接使用，不重算) | - |
 | beta_hist | 历史数据权重 | 0.3 |
 | hist_score | 历史火点得分 ([-1, 1]) | - |
@@ -73,6 +78,7 @@ open http://localhost:8001
 ```
 
 启动后可访问：
+
 - `http://localhost:8001` — Leaflet 地图前端
 - `http://localhost:8001/docs` — Swagger API 文档
 
@@ -83,6 +89,7 @@ open http://localhost:8001
 接收星上系统的输出 JSON，返回地面增强结果。
 
 **请求体：**
+
 ```json
 {
   "results": [
@@ -112,6 +119,7 @@ open http://localhost:8001
 ```
 
 **响应体：**
+
 ```json
 {
   "results": [
@@ -133,6 +141,17 @@ open http://localhost:8001
         "final_confidence": 0.86
       },
       "geocoding_address": "中国江西省南昌市",
+      "heat_source_classification": {
+        "top_type": "vegetation_fire",
+        "top_label_zh": "植被火灾",
+        "top_probability": 0.7231,
+        "estimated_area_km2": 1.269,
+        "area_basis": "基于VIIRS (375m)单像元面积，结合5个历史火点及FRP强度(15.2 MW)扩展估算",
+        "ranked_sources": [
+          { "type": "vegetation_fire", "label_zh": "植被火灾", "probability": 0.7231, "raw_score": 4.3 },
+          { "type": "agricultural_burning", "label_zh": "农业焚烧", "probability": 0.1542, "raw_score": 1.8 }
+        ]
+      },
       "processing_time_ms": 1820.3
     }
   ],
@@ -160,31 +179,32 @@ open http://localhost:8001
 
 ## 项目结构
 
-```
+```text
 fire_ground/
   app/
-    main.py                  # FastAPI 入口 (含前端、DB 初始化、CORS)
-    config.py                # 配置 (GROUND_ 前缀环境变量)
+    main.py                       # FastAPI 入口 (含前端、DB 初始化、CORS)
+    config.py                     # 配置 (GROUND_ 前缀环境变量)
     api/
-      routes.py              # 4 个 API 端点
-      schemas.py             # Pydantic 数据模型
+      routes.py                   # 4 个 API 端点
+      schemas.py                  # Pydantic 数据模型
     core/
-      confidence.py          # 地面置信度引擎 (在星上结果上叠加)
-      pipeline.py            # 增强 Pipeline (历史 + 工业 + 编码并行)
+      confidence.py               # 地面置信度引擎 (在星上结果上叠加)
+      pipeline.py                 # 增强 Pipeline (历史 + 工业 + 编码并行)
     data/
-      cache.py               # LRU 缓存 + SQLite 持久化
-      osm.py                 # OSM Overpass API 客户端
+      cache.py                    # LRU 缓存 + SQLite 持久化
+      osm.py                      # OSM Overpass API 客户端
     services/
-      false_positive.py      # 工业设施假阳性检测 (仅此一种)
-      geocoding.py           # Nominatim 反向地理编码
-      historical.py          # NASA FIRMS 历史火点查询
+      false_positive.py           # 工业设施假阳性检测 (仅此一种)
+      geocoding.py                # Nominatim 反向地理编码
+      historical.py               # NASA FIRMS 历史火点查询
+      heat_source_classifier.py   # 热源类型分类 + 面积估算 (纯计算)
     utils/
-      geo.py                 # 地理计算 (haversine, bbox 等)
-      reason_generator.py    # 中文原因生成 ("[地面增强]" 前缀)
+      geo.py                      # 地理计算 (haversine, bbox 等)
+      reason_generator.py         # 中文原因生成 ("[地面增强]" 前缀)
   static/
-    map.html                 # Leaflet.js 交互式前端
-  data/                      # SQLite 数据库目录
-  tests/                     # 32 个单元测试
+    map.html                      # Leaflet.js 交互式前端
+  data/                           # SQLite 数据库目录
+  tests/                          # 49 个单元测试
   requirements.txt
   pyproject.toml
   .env.example
@@ -195,11 +215,11 @@ fire_ground/
 所有配置通过环境变量设置，前缀 `GROUND_`：
 
 | 变量 | 说明 | 默认值 |
-|------|------|--------|
+| --- | --- | --- |
 | GROUND_FIRMS_MAP_KEY | NASA FIRMS API Key | DEMO_KEY |
-| GROUND_FIRMS_BASE_URL | FIRMS API 地址 | https://firms.modaps.eosdis.nasa.gov/api/area/csv |
-| GROUND_OVERPASS_URL | OSM Overpass 地址 | https://overpass-api.de/api/interpreter |
-| GROUND_NOMINATIM_URL | Nominatim 地址 | https://nominatim.openstreetmap.org/reverse |
+| GROUND_FIRMS_BASE_URL | FIRMS API 地址 | <https://firms.modaps.eosdis.nasa.gov/api/area/csv> |
+| GROUND_OVERPASS_URL | OSM Overpass 地址 | <https://overpass-api.de/api/interpreter> |
+| GROUND_NOMINATIM_URL | Nominatim 地址 | <https://nominatim.openstreetmap.org/reverse> |
 | GROUND_BETA_HIST | 历史数据权重 | 0.3 |
 | GROUND_FP_PENALTY_INDUSTRIAL | 工业设施惩罚值 | 0.8 |
 | GROUND_CACHE_TTL_SECONDS | 缓存 TTL (秒) | 3600 |
@@ -213,7 +233,7 @@ fire_ground/
 python -m pytest tests/ -v
 ```
 
-32 个测试覆盖：地面置信度引擎、地理计算、原因生成、数据模型验证、LRU 缓存。
+49 个测试覆盖：地面置信度引擎、地理计算、原因生成、数据模型验证、LRU 缓存、热源类型分类。
 
 ## 前端使用
 
@@ -226,7 +246,7 @@ python -m pytest tests/ -v
 
 ## 与星上系统对接
 
-```
+```text
 火点传感器 -> 星上系统 (fire_satellite:8000) -> JSON 输出
                                                    |
                                                    v (星地链路)
@@ -236,3 +256,5 @@ python -m pytest tests/ -v
                         v
                   增强结果 + 地图可视化
 ```
+
+地面系统不重复星上已完成的工作，只在星上结果基础上叠加网络依赖的增强分析（历史火点、工业设施、地理编码）。
