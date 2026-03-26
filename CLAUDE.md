@@ -74,8 +74,6 @@ logit(P_地面) = logit(P_卫星) + β_hist × hist_score − industrial_penalty
 | `coastal_reflection`（海岸折射）   | 卫星 `coastal_reflection` 标志触发 + 地物编码 90/95 |
 | `wetland_fire`（湿地火灾）         | 地物编码 90/95 且无海岸触发                           |
 
-面积估算基于传感器像元大小：VIIRS 0.141 km²、MODIS 1.0 km²、默认 0.0025 km²。火灾类型热源按 FRP 强度和历史火点集群规模缩放，上限 500 km²。
-
 ## 数据层
 
 - **`data/osm.py`** — Overpass API 客户端，在边界框内查询工业/电力/制造设施
@@ -98,6 +96,6 @@ logit(P_地面) = logit(P_卫星) + β_hist × hist_score − industrial_penalty
 
 ## 数据模型（`app/api/schemas.py`）
 
-`SatelliteResultInput` 完整镜像卫星系统输出——地面系统不重新计算任何卫星字段。`GroundEnhancedResult` 包装 `SatelliteResultInput` 并附加所有地面专属字段，包括 `heat_source_classification`。
+`SatelliteResultInput` 完整镜像卫星系统输出——地面系统不重新计算任何卫星字段，包括新增的 `fire_area_m2`（火点估算面积，单位 m²）直接透传。`GroundEnhancedResult` 包装 `SatelliteResultInput` 并附加所有地面专属字段，包括 `heat_source_classification`。
 
 所有原因说明均为中文，地面增强新增的原因统一以 `[地面增强]` 为前缀。

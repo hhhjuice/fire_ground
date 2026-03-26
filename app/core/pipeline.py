@@ -114,8 +114,6 @@ async def enhance_single_point(sat_result: SatelliteResultInput) -> GroundEnhanc
         top_type=classification_result.top_type.value,
         top_label_zh=classification_result.top_label_zh,
         top_probability=classification_result.top_probability,
-        estimated_area_km2=classification_result.estimated_area_km2,
-        area_basis=classification_result.area_basis,
     )
 
     elapsed_ms = (time.monotonic() - start_time) * 1000

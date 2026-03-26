@@ -912,7 +912,7 @@
             wetland_fire:         '#e67e22',
         };
 
-        function buildHeatSourceSection(hsc) {
+        function buildHeatSourceSection(hsc, fireAreaM2) {
             if (!hsc) return '';
 
             const bars = hsc.ranked_sources.map(src => {
@@ -928,9 +928,12 @@
                 </div>`;
             }).join('');
 
-            const areaStr = hsc.estimated_area_km2 >= 1
-                ? `${hsc.estimated_area_km2.toFixed(3)} km²`
-                : `${(hsc.estimated_area_km2 * 1e6).toFixed(0)} m²`;
+            const areaRow = fireAreaM2 != null
+                ? `<div class="analysis-row">
+                        <span class="row-label">📐 火点面积</span>
+                        <span class="row-val"><strong>${fireAreaM2 >= 1e6 ? (fireAreaM2 / 1e6).toFixed(3) + ' km²' : fireAreaM2.toFixed(0) + ' m²'}</strong></span>
+                    </div>`
+                : '';
 
             return `<div class="analysis-section heat-section">
                 <div class="analysis-section-header" onclick="toggleSection(this)">
@@ -943,13 +946,7 @@
                         <span class="row-label">概率排名</span>
                         <span class="row-val">${bars}</span>
                     </div>
-                    <div class="analysis-row">
-                        <span class="row-label">📐 估算面积</span>
-                        <span class="row-val">
-                            <strong>${areaStr}</strong>
-                            <br><span style="font-size:0.73rem;color:#94a3b8">${hsc.area_basis}</span>
-                        </span>
-                    </div>
+                    ${areaRow}
                 </div>
             </div>`;
         }
@@ -1127,7 +1124,7 @@
 
                     ${buildSatelliteSection(satData)}
                     ${buildGroundSection(res)}
-                    ${buildHeatSourceSection(hsc)}
+                    ${buildHeatSourceSection(hsc, satData.fire_area_m2)}
                 `;
                 
                 container.appendChild(card);
@@ -1151,10 +1148,10 @@
                     mapMarkers.push(line);
                 }
 
-                const hscAreaStr = hsc
-                    ? (hsc.estimated_area_km2 >= 1
-                        ? hsc.estimated_area_km2.toFixed(2) + ' km²'
-                        : (hsc.estimated_area_km2 * 1e6).toFixed(0) + ' m²')
+                const hscAreaStr = satData.fire_area_m2 != null
+                    ? (satData.fire_area_m2 >= 1e6
+                        ? (satData.fire_area_m2 / 1e6).toFixed(3) + ' km²'
+                        : satData.fire_area_m2.toFixed(0) + ' m²')
                     : '';
 
                 const popupContent = `
@@ -1168,7 +1165,7 @@
                     <div class="popup-desc">
                         <span class="sat-badge">星上</span> ${satData.summary || ''}
                     </div>
-                    ${hsc ? `<div class="popup-meta">🌡 热源: <strong>${hsc.top_label_zh}</strong> ${Math.round(hsc.top_probability * 100)}% &nbsp;·&nbsp; 面积 ${hscAreaStr}</div>` : ''}
+                    ${hsc ? `<div class="popup-meta">🌡 热源: <strong>${hsc.top_label_zh}</strong> ${Math.round(hsc.top_probability * 100)}%${hscAreaStr ? ` &nbsp;·&nbsp; 面积 ${hscAreaStr}` : ''}</div>` : ''}
                     ${res.geocoding_address ? `<div class="popup-meta">📍 ${res.geocoding_address}</div>` : ''}
                 `;
                 

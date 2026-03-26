@@ -4,8 +4,6 @@ from __future__ import annotations
 
 from typing import Optional
 
-import pytest
-
 from app.api.schemas import (
     EnvironmentalResult,
     FalsePositiveFlag,
@@ -22,7 +20,6 @@ from app.api.schemas import (
 from app.services.heat_source_classifier import (
     HeatSourceType,
     classify_heat_sources,
-    _estimate_area,
 )
 
 
@@ -238,37 +235,3 @@ class TestProbabilityDistribution:
         assert probs == sorted(probs, reverse=True)
 
 
-# ---------------------------------------------------------------------------
-# Area estimation tests
-# ---------------------------------------------------------------------------
-
-class TestAreaEstimation:
-    def test_default_pixel_area(self):
-        area, basis = _estimate_area(HeatSourceType.INDUSTRIAL_HEAT, 0)
-        assert area == pytest.approx(0.141, abs=1e-4)
-        assert "VIIRS" in basis
-
-    def test_custom_pixel_size(self):
-        area, basis = _estimate_area(HeatSourceType.INDUSTRIAL_HEAT, 0, pixel_km2=1.0, sensor_desc="MODIS (1km)")
-        assert area == pytest.approx(1.0, abs=1e-4)
-        assert "MODIS" in basis
-
-    def test_fire_type_scales_with_history(self):
-        area_few, _ = _estimate_area(HeatSourceType.VEGETATION_FIRE, 2)
-        area_many, _ = _estimate_area(HeatSourceType.VEGETATION_FIRE, 20)
-        assert area_many > area_few
-
-    def test_fire_area_capped_at_500(self):
-        area, _ = _estimate_area(HeatSourceType.VEGETATION_FIRE, 9999)
-        assert area <= 500.0
-
-    def test_non_fire_type_uses_single_pixel(self):
-        area, _ = _estimate_area(HeatSourceType.SUN_GLINT, 10)
-        assert area == pytest.approx(0.141, abs=1e-4)
-
-    def test_area_in_classification_result(self):
-        sat = _make_sat(landcover_code=10, fire_season=1.4)
-        result = classify_heat_sources(sat, _make_firms(FirmsMatchLevel.EXACT_MATCH), None)
-
-        assert result.estimated_area_km2 > 0
-        assert result.area_basis != ""

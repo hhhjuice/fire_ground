@@ -47,14 +47,7 @@ _LABEL_ZH: dict[HeatSourceType, str] = {
     HeatSourceType.WETLAND_FIRE: "湿地火灾",
 }
 
-# Categories that represent actual combustion events (vs. artifacts / point heat)
-_FIRE_TYPES: frozenset[HeatSourceType] = frozenset({
-    HeatSourceType.VEGETATION_FIRE,
-    HeatSourceType.AGRICULTURAL_BURNING,
-    HeatSourceType.WETLAND_FIRE,
-})
-
-# Map FirmsMatchLevel to a proxy score and fire cluster count for scoring/area estimation
+# Map FirmsMatchLevel to a proxy score for scoring
 _FIRMS_SCORE: dict[FirmsMatchLevel, float] = {
     FirmsMatchLevel.EXACT_MATCH: 1.0,
     FirmsMatchLevel.NEARBY_SAME_SEASON: 0.7,
@@ -62,15 +55,6 @@ _FIRMS_SCORE: dict[FirmsMatchLevel, float] = {
     FirmsMatchLevel.NO_SEASON_RECORD: -0.2,
     FirmsMatchLevel.NO_HISTORY: -0.3,
     FirmsMatchLevel.CONFIRMED_NONE: -0.5,
-}
-
-_FIRMS_COUNT: dict[FirmsMatchLevel, int] = {
-    FirmsMatchLevel.EXACT_MATCH: 10,
-    FirmsMatchLevel.NEARBY_SAME_SEASON: 5,
-    FirmsMatchLevel.REGIONAL: 2,
-    FirmsMatchLevel.NO_SEASON_RECORD: 0,
-    FirmsMatchLevel.NO_HISTORY: 0,
-    FirmsMatchLevel.CONFIRMED_NONE: 0,
 }
 
 
@@ -86,14 +70,12 @@ class HeatSourceCandidate:
 
 @dataclass
 class HeatSourceClassificationResult:
-    """Complete classification result including area estimate."""
+    """Complete classification result."""
 
     ranked_sources: list[HeatSourceCandidate]  # sorted by probability, descending
     top_type: HeatSourceType
     top_label_zh: str
     top_probability: float
-    estimated_area_km2: float
-    area_basis: str
 
 
 def classify_heat_sources(
@@ -131,7 +113,6 @@ def classify_heat_sources(
 
     # Ground service results mapped to proxy values
     hist_score: float = _FIRMS_SCORE.get(firms.match_level, 0.0) if firms else 0.0
-    hist_count: int = _FIRMS_COUNT.get(firms.match_level, 0) if firms else 0
     industrial_triggered: bool = (
         industrial.proximity != IndustrialProximity.NONE if industrial else False
     )
@@ -271,43 +252,9 @@ def classify_heat_sources(
     candidates.sort(key=lambda c: c.probability, reverse=True)
     top = candidates[0]
 
-    # --- Area estimation ---
-    area_km2, area_basis = _estimate_area(
-        top_type=top.type,
-        hist_count=hist_count,
-    )
-
     return HeatSourceClassificationResult(
         ranked_sources=candidates,
         top_type=top.type,
         top_label_zh=top.label_zh,
         top_probability=top.probability,
-        estimated_area_km2=area_km2,
-        area_basis=area_basis,
     )
-
-
-def _estimate_area(
-    top_type: HeatSourceType,
-    hist_count: int,
-    pixel_km2: float = 0.141,
-    sensor_desc: str = "VIIRS (375m)",
-) -> tuple[float, str]:
-    """Estimate the spatial area of the heat anomaly (km²).
-
-    Fire-type sources are scaled by historical fire cluster size.
-    Point sources and atmospheric artifacts use a single pixel.
-    Default pixel size is VIIRS (375m) as the most common modern sensor.
-    """
-    if top_type in _FIRE_TYPES:
-        hist_factor = min(1.0 + hist_count * 0.1, 5.0)
-        area = pixel_km2 * hist_factor
-        area = min(area, 500.0)
-        area_basis = (
-            f"基于{sensor_desc}单像元面积，结合{hist_count}个历史火点集群规模估算"
-        )
-    else:
-        area = pixel_km2
-        area_basis = f"基于{sensor_desc}单像元面积（点热源）"
-
-    return round(area, 6), area_basis

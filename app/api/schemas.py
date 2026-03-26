@@ -102,6 +102,7 @@ class SatelliteResultInput(BaseModel):
     environmental: Optional[EnvironmentalResult] = Field(None, description="环境因素分析")
     confidence_breakdown: Optional[SatelliteConfidenceBreakdown] = Field(None, description="置信度分解")
 
+    fire_area_m2: Optional[float] = Field(None, ge=0, description="火点估算面积 (m²)，来自星上系统")
     processing_time_ms: float = Field(0.0, ge=0, description="星上处理耗时 (毫秒)")
 
 
@@ -171,7 +172,7 @@ class HeatSourceCandidateSchema(BaseModel):
 
 
 class HeatSourceClassificationSchema(BaseModel):
-    """Heat source type classification result with area estimate."""
+    """Heat source type classification result."""
 
     ranked_sources: list[HeatSourceCandidateSchema] = Field(
         ..., description="热源类型概率排名（降序）"
@@ -179,8 +180,6 @@ class HeatSourceClassificationSchema(BaseModel):
     top_type: str = Field(..., description="最可能的热源类型标识")
     top_label_zh: str = Field(..., description="最可能的热源类型中文名称")
     top_probability: float = Field(..., ge=0, le=1, description="最高类型概率")
-    estimated_area_km2: float = Field(..., ge=0, description="估算异常热源面积 (km²)")
-    area_basis: str = Field("", description="面积估算依据说明")
 
 
 class GroundEnhancedResult(BaseModel):

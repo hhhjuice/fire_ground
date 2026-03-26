@@ -10,7 +10,7 @@
 - **历史火点验证** — NASA FIRMS 近期火灾记录查询
 - **工业设施检测** — OSM Overpass 工业热源假阳性排查
 - **反向地理编码** — Nominatim 获取可读地址
-- **热源类型分类** — 8 类热源（植被火灾、农业焚烧、工业热源等）概率排名 + 异常面积估算
+- **热源类型分类** — 8 类热源（植被火灾、农业焚烧、工业热源等）概率排名，直接展示星上 `fire_area_m2`
 - **Leaflet.js 交互式前端** — 地图可视化，支持 JSON 输入和手动输入
 - **SQLite 持久化** — 增强结果入库，可查询历史记录
 - **LRU 缓存** — FIRMS 查询结果缓存，减少重复请求
@@ -38,7 +38,6 @@
         |
         +-- 分类 (纯计算，无 I/O)
         |   +-- 热源类型分类 (8 类, softmax)
-        |   +-- 异常面积估算
         |
         +-- 输出
             +-- SQLite 持久化
@@ -145,8 +144,6 @@ open http://localhost:8001
         "top_type": "vegetation_fire",
         "top_label_zh": "植被火灾",
         "top_probability": 0.7231,
-        "estimated_area_km2": 1.269,
-        "area_basis": "基于VIIRS (375m)单像元面积，结合5个历史火点及FRP强度(15.2 MW)扩展估算",
         "ranked_sources": [
           { "type": "vegetation_fire", "label_zh": "植被火灾", "probability": 0.7231, "raw_score": 4.3 },
           { "type": "agricultural_burning", "label_zh": "农业焚烧", "probability": 0.1542, "raw_score": 1.8 }
@@ -197,14 +194,14 @@ fire_ground/
       false_positive.py           # 工业设施假阳性检测 (仅此一种)
       geocoding.py                # Nominatim 反向地理编码
       historical.py               # NASA FIRMS 历史火点查询
-      heat_source_classifier.py   # 热源类型分类 + 面积估算 (纯计算)
+      heat_source_classifier.py   # 热源类型分类 (纯计算，8 类 softmax)
     utils/
       geo.py                      # 地理计算 (haversine, bbox 等)
       reason_generator.py         # 中文原因生成 ("[地面增强]" 前缀)
   static/
     map.html                      # Leaflet.js 交互式前端
   data/                           # SQLite 数据库目录
-  tests/                          # 49 个单元测试
+  tests/                          # 48 个单元测试
   requirements.txt
   pyproject.toml
   .env.example
@@ -233,7 +230,7 @@ fire_ground/
 python -m pytest tests/ -v
 ```
 
-49 个测试覆盖：地面置信度引擎、地理计算、原因生成、数据模型验证、LRU 缓存、热源类型分类。
+48 个测试覆盖：地面置信度引擎、地理计算、原因生成、数据模型验证、LRU 缓存、热源类型分类。
 
 ## 前端使用
 
