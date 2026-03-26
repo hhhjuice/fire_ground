@@ -552,28 +552,11 @@
                 </div>
             </div>
             
-            <div class="grid-2">
-                <div class="form-group">
-                    <label>卫星 (Satellite)</label>
-                    <input type="text" id="satellite" class="form-control" placeholder="例如: VIIRS" value="VIIRS">
-                </div>
-                <div class="form-group">
-                    <label>置信度 (0-100)</label>
-                    <input type="number" id="confidence" class="form-control" placeholder="80" value="80">
-                </div>
+            <div class="form-group">
+                <label>置信度 (0-100)</label>
+                <input type="number" id="confidence" class="form-control" placeholder="80" value="80" min="0" max="100">
             </div>
-            
-            <div class="grid-2">
-                <div class="form-group">
-                    <label>亮温 (Brightness)</label>
-                    <input type="number" id="brightness" class="form-control" step="0.1" placeholder="340.0" value="340.0">
-                </div>
-                <div class="form-group">
-                    <label>FRP</label>
-                    <input type="number" id="frp" class="form-control" step="0.1" placeholder="15.2" value="15.2">
-                </div>
-            </div>
-            
+
             <div class="form-group">
                 <label>采集时间 (可选)</label>
                 <input type="datetime-local" id="acq_time" class="form-control">
@@ -614,30 +597,22 @@
         }
 
         function fillDemo() {
-            // Fill manual fields
             document.getElementById('lat').value = "28.5";
             document.getElementById('lon').value = "116.3";
-            document.getElementById('satellite').value = "VIIRS";
-            document.getElementById('brightness').value = "340";
-            document.getElementById('frp').value = "15.2";
-            document.getElementById('confidence').value = "80";
-            
-            // Fill JSON
+            document.getElementById('confidence').value = "62";
+
             const demoJson = {
                 "input_point": {
                     "latitude": 28.5,
                     "longitude": 116.3,
-                    "satellite": "VIIRS",
-                    "brightness": 342.5,
-                    "frp": 15.2,
                     "confidence": 80,
                     "acquisition_time": null
                 },
                 "verdict": "UNCERTAIN",
-                "final_confidence": 0.62,
+                "final_confidence": 62.0,
                 "reasons": [
                     "地物类型为草地，属于高火灾风险区域",
-                    "高亮温 (342.5K > 340K)，为活跃火点增加置信度"
+                    "白天观测，春季火灾高发期"
                 ],
                 "summary": "星上主判结果为不确定，最终置信度 62.0%，建议地面核实。",
                 "coordinate_correction": {
@@ -657,10 +632,10 @@
                 },
                 "false_positive": {
                     "flags": [
-                        {"detector": "水体", "triggered": false, "penalty": 0.0, "detail": ""},
-                        {"detector": "城市热岛", "triggered": false, "penalty": 0.0, "detail": ""},
-                        {"detector": "太阳耀斑", "triggered": false, "penalty": 0.0, "detail": "太阳天顶角 42.3°，无耀斑风险"},
-                        {"detector": "海岸反射", "triggered": false, "penalty": 0.0, "detail": ""}
+                        {"detector": "water_body", "triggered": false, "penalty": 0.0, "detail": ""},
+                        {"detector": "urban_heat", "triggered": false, "penalty": 0.0, "detail": ""},
+                        {"detector": "sun_glint", "triggered": false, "penalty": 0.0, "detail": "太阳天顶角 42.3°，无耀斑风险"},
+                        {"detector": "coastal_reflection", "triggered": false, "penalty": 0.0, "detail": ""}
                     ],
                     "total_penalty": 0.0,
                     "is_likely_false_positive": false
@@ -673,17 +648,15 @@
                     "detail": "白天观测，春季火灾高发期，环境评分适中"
                 },
                 "confidence_breakdown": {
-                    "initial_confidence": 0.5,
+                    "initial_confidence": 50.0,
                     "landcover_contribution": 1.099,
                     "environmental_contribution": 0.03,
-                    "brightness_bonus": 0.3,
-                    "frp_bonus": 0.0,
                     "false_positive_penalty": 0.0,
-                    "final_confidence": 0.62
+                    "final_confidence": 62.0
                 },
                 "processing_time_ms": 45.2
             };
-            
+
             document.getElementById('jsonInput').value = JSON.stringify(demoJson, null, 2);
         }
 
@@ -723,14 +696,11 @@
                     input_point: {
                         latitude: lat,
                         longitude: lon,
-                        satellite: document.getElementById('satellite').value || "UNKNOWN",
-                        brightness: parseFloat(document.getElementById('brightness').value) || 0,
-                        frp: parseFloat(document.getElementById('frp').value) || 0,
                         confidence: confidence,
                         acquisition_time: document.getElementById('acq_time').value || null
                     },
                     verdict: "UNCERTAIN",
-                    final_confidence: confidence / 100.0,
+                    final_confidence: confidence,
                     reasons: ["手动输入火点，使用默认星上置信度"],
                     summary: "手动输入火点，待地面增强验证",
                     coordinate_correction: null,
@@ -779,8 +749,8 @@
         }
 
         function confBarHtml(conf) {
-            const pct = Math.round(conf * 100);
-            const cls = pct >= 75 ? 'high' : pct >= 35 ? 'mid' : 'low';
+            const pct = Math.round(conf);
+            const cls = pct >= 75 ? 'high' : pct >= 50 ? 'mid' : 'low';
             return `<div class="conf-bar-wrap">
                 <div class="conf-bar"><div class="conf-bar-fill ${cls}" style="width:${pct}%"></div></div>
                 <span class="conf-bar-label" style="color:${cls==='high'?'#15803d':cls==='mid'?'#92400e':'#64748b'}">${pct}%</span>
@@ -871,8 +841,6 @@
                     ['初始置信度', cb.initial_confidence],
                     ['地物贡献', cb.landcover_contribution],
                     ['环境贡献', cb.environmental_contribution],
-                    ['亮温加成', cb.brightness_bonus],
-                    ['FRP加成', cb.frp_bonus],
                     ['假阳性惩罚', cb.false_positive_penalty],
                 ].filter(([, v]) => v !== undefined && v !== null && v !== 0)
                  .map(([k, v]) => `<span style="color:#64748b">${k}</span> <strong>${v > 0 ? '+' : ''}${typeof v === 'number' ? v.toFixed(3) : v}</strong>`)
@@ -885,9 +853,6 @@
 
             // Sensor metadata
             const sensorParts = [];
-            if (pt.satellite) sensorParts.push(`卫星: <strong>${pt.satellite}</strong>`);
-            if (pt.brightness != null) sensorParts.push(`亮温: <strong>${pt.brightness} K</strong>`);
-            if (pt.frp != null) sensorParts.push(`FRP: <strong>${pt.frp} MW</strong>`);
             if (pt.confidence != null) sensorParts.push(`原始置信度: <strong>${pt.confidence}%</strong>`);
             if (pt.acquisition_time) sensorParts.push(`观测时间: <strong>${new Date(pt.acquisition_time).toLocaleString('zh-CN')}</strong>`);
             if (sensorParts.length > 0) {
@@ -925,7 +890,7 @@
             return `<div class="analysis-section sat-section">
                 <div class="analysis-section-header" onclick="toggleSection(this)">
                     🛰 星上分析
-                    <span style="margin-left:8px;opacity:0.7;font-weight:400;font-size:0.72rem">• ${satVDetails.label} · ${(satData.final_confidence*100).toFixed(0)}%</span>
+                    <span style="margin-left:8px;opacity:0.7;font-weight:400;font-size:0.72rem">• ${satVDetails.label} · ${satData.final_confidence.toFixed(1)}%</span>
                     <span class="toggle-icon">▲</span>
                 </div>
                 <div class="analysis-section-body">
@@ -936,6 +901,7 @@
         }
 
         const HEAT_COLORS = {
+
             vegetation_fire:      '#e74c3c',
             agricultural_burning: '#f39c12',
             industrial_heat:      '#3498db',
@@ -999,38 +965,44 @@
                 </div>`);
             }
 
-            // Historical
-            const hist = res.historical;
-            if (hist) {
-                const scoreChip = hist.score > 0
-                    ? `<span class="chip chip-danger">历史支持 +${hist.score.toFixed(2)}</span>`
-                    : hist.score < 0
-                        ? `<span class="chip chip-ok">历史否定 ${hist.score.toFixed(2)}</span>`
+            // FIRMS historical
+            const firms = res.firms;
+            if (firms) {
+                const positiveMatches = ['EXACT_MATCH', 'NEARBY_SAME_SEASON', 'REGIONAL'];
+                const negativeMatches = ['NO_SEASON_RECORD', 'NO_HISTORY', 'CONFIRMED_NONE'];
+                const isPositive = positiveMatches.includes(firms.match_level);
+                const isNegative = negativeMatches.includes(firms.match_level);
+                const matchChip = isPositive
+                    ? `<span class="chip chip-danger">历史支持</span>`
+                    : isNegative
+                        ? `<span class="chip chip-ok">历史否定</span>`
                         : `<span class="chip" style="background:#f1f5f9;color:#64748b">历史中性</span>`;
-                const dist = hist.nearest_distance_m != null
-                    ? (hist.nearest_distance_m >= 1000
-                        ? `${(hist.nearest_distance_m/1000).toFixed(2)} km`
-                        : `${hist.nearest_distance_m.toFixed(0)} m`)
-                    : '-';
+                const distStr = firms.nearest_fire_km != null ? `${firms.nearest_fire_km.toFixed(2)} km` : '-';
                 rows.push(`<div class="analysis-row">
                     <span class="row-label">📜 历史火情</span>
                     <span class="row-val">
-                        ${scoreChip}
-                        <span style="margin-left:4px">共 <strong>${hist.nearby_fire_count}</strong> 次，最近 <strong>${dist}</strong></span>
-                        ${hist.detail ? `<br><span style="font-size:0.75rem;color:#64748b">${hist.detail}</span>` : ''}
+                        ${matchChip}
+                        <span style="margin-left:4px">最近: <strong>${distStr}</strong></span>
+                        ${firms.detail ? `<br><span style="font-size:0.75rem;color:#64748b">${firms.detail}</span>` : ''}
                     </span>
                 </div>`);
             }
 
-            // Industrial false positive
-            const ind = res.industrial_fp;
-            if (ind && ind.flag) {
-                const triggered = ind.flag.triggered;
+            // Industrial proximity
+            const ind = res.industrial;
+            if (ind) {
+                const triggered = ind.proximity !== 'NONE';
+                const chipClass = ind.is_gas_flare ? 'chip-warn' : triggered ? 'chip-danger' : 'chip-ok';
+                const chipText = ind.is_gas_flare
+                    ? '油气火炬（真实燃烧）⚠'
+                    : triggered
+                        ? `工业热源 ${ind.proximity} ⚠`
+                        : '未检测到工业设施 ✓';
                 rows.push(`<div class="analysis-row">
                     <span class="row-label">🏭 工业热源</span>
                     <span class="row-val">
-                        <span class="chip ${triggered ? 'chip-danger' : 'chip-ok'}">${triggered ? '检测到工业热源 ⚠' : '未检测到工业热源 ✓'}</span>
-                        ${ind.flag.detail ? `<br><span style="font-size:0.75rem;color:#64748b">${ind.flag.detail}</span>` : ''}
+                        <span class="chip ${chipClass}">${chipText}</span>
+                        ${ind.detail ? `<br><span style="font-size:0.75rem;color:#64748b">${ind.detail}</span>` : ''}
                     </span>
                 </div>`);
             }
@@ -1039,16 +1011,16 @@
             const gcb = res.ground_confidence_breakdown;
             if (gcb) {
                 const delta = gcb.final_confidence - gcb.satellite_confidence;
-                const deltaStr = `${delta >= 0 ? '+' : ''}${(delta * 100).toFixed(1)}%`;
-                const deltaColor = delta > 0.01 ? '#15803d' : delta < -0.01 ? '#b91c1c' : '#64748b';
+                const deltaStr = `${delta >= 0 ? '+' : ''}${delta.toFixed(1)}%`;
+                const deltaColor = delta > 1 ? '#15803d' : delta < -1 ? '#b91c1c' : '#64748b';
                 rows.push(`<div class="analysis-row">
                     <span class="row-label">置信度变化</span>
                     <span class="row-val" style="font-size:0.76rem">
-                        星上 ${(gcb.satellite_confidence*100).toFixed(0)}%
-                        → 地面 ${(gcb.final_confidence*100).toFixed(0)}%
+                        星上 ${gcb.satellite_confidence.toFixed(1)}%
+                        → 地面 ${gcb.final_confidence.toFixed(1)}%
                         &nbsp;<span style="font-weight:600;color:${deltaColor}">${deltaStr}</span>
-                        ${gcb.historical_contribution !== 0 ? `<br><span style="color:#64748b">历史贡献 ${gcb.historical_contribution > 0 ? '+' : ''}${gcb.historical_contribution.toFixed(3)}</span>` : ''}
-                        ${gcb.industrial_penalty !== 0 ? `&nbsp;<span style="color:#64748b">工业惩罚 −${gcb.industrial_penalty.toFixed(3)}</span>` : ''}
+                        ${gcb.firms_contribution !== 0 ? `<br><span style="color:#64748b">FIRMS贡献 ${gcb.firms_contribution > 0 ? '+' : ''}${gcb.firms_contribution.toFixed(3)}</span>` : ''}
+                        ${gcb.industrial_contribution !== 0 ? `&nbsp;<span style="color:#64748b">工业修正 ${gcb.industrial_contribution > 0 ? '+' : ''}${gcb.industrial_contribution.toFixed(3)}</span>` : ''}
                     </span>
                 </div>`);
             }
@@ -1087,7 +1059,7 @@
             return `<div class="analysis-section ground-section">
                 <div class="analysis-section-header" onclick="toggleSection(this)">
                     🌍 地面增强分析
-                    <span style="margin-left:8px;opacity:0.7;font-weight:400;font-size:0.72rem">• ${gVDetails.label} · ${(res.ground_confidence*100).toFixed(0)}%</span>
+                    <span style="margin-left:8px;opacity:0.7;font-weight:400;font-size:0.72rem">• ${gVDetails.label} · ${res.ground_confidence.toFixed(1)}%</span>
                     <span class="toggle-icon">▲</span>
                 </div>
                 <div class="analysis-section-body">
@@ -1148,8 +1120,8 @@
                             ${heatChipHtml}
                         </div>
                         <div class="confidence-box">
-                            <div class="confidence-score">${(res.ground_confidence * 100).toFixed(0)}%</div>
-                            <div class="sat-confidence">🛰 星上: ${(satData.final_confidence * 100).toFixed(0)}%</div>
+                            <div class="confidence-score">${res.ground_confidence.toFixed(1)}%</div>
+                            <div class="sat-confidence">🛰 星上: ${satData.final_confidence.toFixed(1)}%</div>
                         </div>
                     </div>
 
@@ -1188,7 +1160,7 @@
                 const popupContent = `
                     <div class="popup-title">
                         <span class="badge ${gVDetails.class}">${gVDetails.label}</span>
-                        ${(res.ground_confidence * 100).toFixed(0)}%
+                        ${res.ground_confidence.toFixed(1)}%
                     </div>
                     <div class="popup-desc" style="margin-bottom:5px">
                         <span class="ground-badge">地面</span> ${res.ground_summary || ''}
