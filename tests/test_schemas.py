@@ -11,7 +11,7 @@ from app.api.schemas import (
 
 
 def test_satellite_result_input_accepts_valid_data(mock_satellite_result) -> None:
-    assert mock_satellite_result.final_confidence == 0.65
+    assert mock_satellite_result.final_confidence == 65.0
     assert mock_satellite_result.verdict == Verdict.UNCERTAIN
 
 
@@ -30,11 +30,11 @@ def test_ground_enhanced_result_defaults(mock_satellite_result) -> None:
     result = GroundEnhancedResult(
         satellite_result=mock_satellite_result,
         ground_verdict=Verdict.UNCERTAIN,
-        ground_confidence=0.65,
+        ground_confidence=65.0,
     )
     assert result.ground_reasons == []
     assert result.ground_summary == ""
     assert result.processing_time_ms == 0.0
     assert result.geocoding_address is None
-    assert result.historical is None
-    assert result.industrial_fp is None
+    assert result.firms is None
+    assert result.industrial is None

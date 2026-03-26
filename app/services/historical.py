@@ -2,12 +2,13 @@
 import asyncio
 import csv
 import logging
-import math
+from datetime import datetime
 from io import StringIO
+from typing import Optional
 
 import httpx
 
-from app.api.schemas import HistoricalFireResult
+from app.api.schemas import FirmsMatchLevel, FirmsResult
 from app.config import get_settings
 from app.utils.geo import bbox_from_point, haversine
 
@@ -16,6 +17,11 @@ logger = logging.getLogger(__name__)
 FIRMS_SOURCES = ["VIIRS_SNPP_NRT", "VIIRS_NOAA20_NRT", "MODIS_NRT"]
 FIRMS_MAX_DAYS = 5
 FIRMS_SOURCE_TIMEOUT = 6.0
+
+# Distance thresholds (km) for FirmsMatchLevel classification
+_EXACT_KM = 1.0
+_NEARBY_KM = 5.0
+_REGIONAL_KM = 10.0
 
 
 async def _query_source(
@@ -43,8 +49,8 @@ async def _query_source(
 async def query_firms(
     lat: float,
     lon: float,
-    radius_km: float = 5.0,
-    days_back: int = 30,
+    radius_km: float = 10.0,
+    days_back: int = 5,
 ) -> list[dict]:
     settings = get_settings()
     radius_m = radius_km * 1000.0
@@ -81,76 +87,88 @@ async def query_firms(
     return all_fires
 
 
-def _compute_score(
+def _parse_fire_date(fire: dict) -> Optional[datetime]:
+    """Parse acq_date from a FIRMS record."""
+    acq_date = fire.get("acq_date", "")
+    if not acq_date:
+        return None
+    try:
+        return datetime.strptime(acq_date, "%Y-%m-%d")
+    except ValueError:
+        return None
+
+
+def _classify_match_level(
     fires: list[dict],
     lat: float,
     lon: float,
-    radius_km: float,
-) -> tuple[float, float, int]:
+) -> FirmsResult:
+    """Map FIRMS NRT results to a FirmsMatchLevel enum."""
     if not fires:
-        return -0.3, 0.0, 0
+        return FirmsResult(
+            match_level=FirmsMatchLevel.NO_HISTORY,
+            nearest_fire_km=None,
+            nearest_fire_date=None,
+            detail="搜索范围内无历史火点记录",
+        )
 
-    distances: list[float] = []
+    distances: list[tuple[float, Optional[datetime]]] = []
     for fire in fires:
         try:
             f_lat = float(fire.get("latitude", 0))
             f_lon = float(fire.get("longitude", 0))
-            dist = haversine(lat, lon, f_lat, f_lon)
-            distances.append(dist)
+            dist_km = haversine(lat, lon, f_lat, f_lon) / 1000.0
+            fire_date = _parse_fire_date(fire)
+            distances.append((dist_km, fire_date))
         except (ValueError, TypeError):
             continue
 
     if not distances:
-        return -0.3, 0.0, 0
+        return FirmsResult(
+            match_level=FirmsMatchLevel.NO_HISTORY,
+            nearest_fire_km=None,
+            nearest_fire_date=None,
+            detail="搜索范围内无有效历史火点记录",
+        )
 
-    radius_m = radius_km * 1000.0
-    nearby_distances = [d for d in distances if d <= radius_m]
-    if not nearby_distances:
-        return -0.3, 0.0, 0
+    distances.sort(key=lambda x: x[0])
+    nearest_km, nearest_date = distances[0]
 
-    nearest = min(nearby_distances)
-    count = len(nearby_distances)
+    if nearest_km < _EXACT_KM:
+        match_level = FirmsMatchLevel.EXACT_MATCH
+        detail = f"同位置1km内发现历史火点，距离{nearest_km:.2f}km"
+    elif nearest_km < _NEARBY_KM:
+        match_level = FirmsMatchLevel.NEARBY_SAME_SEASON
+        detail = f"5km内发现历史火点，距离{nearest_km:.2f}km"
+    elif nearest_km < _REGIONAL_KM:
+        match_level = FirmsMatchLevel.REGIONAL
+        detail = f"10km内发现历史火点，距离{nearest_km:.2f}km"
+    else:
+        match_level = FirmsMatchLevel.NO_HISTORY
+        detail = f"最近历史火点距离{nearest_km:.2f}km，超出有效范围"
 
-    dist_factor = max(0.0, 1.0 - (nearest / radius_m))
-    count_factor = min(1.0, math.log1p(count) / math.log1p(20))
-
-    score = 0.7 * dist_factor + 0.3 * count_factor
-    score = max(-1.0, min(1.0, score))
-
-    return score, nearest, count
+    return FirmsResult(
+        match_level=match_level,
+        nearest_fire_km=round(nearest_km, 2),
+        nearest_fire_date=nearest_date,
+        detail=detail,
+    )
 
 
 async def get_historical_fires(
     lat: float,
     lon: float,
-    radius_km: float = 5.0,
-    days_back: int = 30,
-) -> HistoricalFireResult:
+    radius_km: float = 10.0,
+    days_back: int = 5,
+) -> FirmsResult:
     try:
         fires = await query_firms(lat, lon, radius_km=radius_km, days_back=days_back)
-        score, nearest_m, count = _compute_score(fires, lat, lon, radius_km)
-
-        if count > 0:
-            detail = (
-                f"过去{days_back}天内半径{radius_km}km范围发现{count}个历史火点，"
-                f"最近距离{nearest_m:.0f}m"
-            )
-        else:
-            detail = f"过去{days_back}天内半径{radius_km}km范围未发现历史火点"
-
-        return HistoricalFireResult(
-            nearby_fire_count=count,
-            nearest_distance_m=nearest_m if count > 0 else None,
-            days_searched=days_back,
-            score=score,
-            detail=detail,
-        )
+        return _classify_match_level(fires, lat, lon)
     except Exception as e:
         logger.warning("Historical fire service failed: %s", e)
-        return HistoricalFireResult(
-            nearby_fire_count=0,
-            nearest_distance_m=None,
-            days_searched=days_back,
-            score=0.0,
+        return FirmsResult(
+            match_level=FirmsMatchLevel.NO_HISTORY,
+            nearest_fire_km=None,
+            nearest_fire_date=None,
             detail="历史火点查询失败，返回默认结果",
         )

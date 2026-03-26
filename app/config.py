@@ -20,11 +20,19 @@ class Settings(BaseSettings):
     # Nominatim
     nominatim_url: str = "https://nominatim.openstreetmap.org/reverse"
 
-    # Confidence weights (ground only adds historical + industrial)
-    beta_hist: float = 0.3
+    # FIRMS likelihood ratios per FirmsMatchLevel (used as ln(LR) in logit space)
+    firms_lr_exact_match: float = 4.0
+    firms_lr_nearby_same_season: float = 2.5
+    firms_lr_regional: float = 1.5
+    firms_lr_no_season_record: float = 0.8
+    firms_lr_no_history: float = 0.5
+    firms_lr_confirmed_none: float = 0.3
 
-    # False positive penalty (ground only has industrial detector)
-    fp_penalty_industrial: float = 0.8
+    # Industrial facility delta per IndustrialProximity (logit space)
+    industrial_delta_within_500m: float = -2.5
+    industrial_delta_within_2km: float = -1.5
+    industrial_delta_within_5km: float = -0.8
+    industrial_delta_none: float = 0.3
 
     # Cache settings
     cache_ttl_seconds: int = 3600

@@ -10,22 +10,22 @@ def test_ground_reasons_include_satellite_reasons(mock_satellite_result) -> None
     assert "未检测到假阳性特征" in reasons[1]
 
 
-def test_ground_reasons_include_historical(mock_satellite_result, positive_historical_result) -> None:
-    """Should add historical fire analysis reason."""
+def test_ground_reasons_include_firms(mock_satellite_result, positive_firms_result) -> None:
+    """Should add FIRMS historical fire analysis reason."""
     reasons = generate_ground_reasons(
         satellite_result=mock_satellite_result,
-        historical=positive_historical_result,
+        firms=positive_firms_result,
     )
     joined = " ".join(reasons)
     assert "[地面增强]" in joined
     assert "历史" in joined
 
 
-def test_ground_reasons_include_industrial(mock_satellite_result, industrial_fp_result) -> None:
+def test_ground_reasons_include_industrial(mock_satellite_result, industrial_result) -> None:
     """Should add industrial detection reason."""
     reasons = generate_ground_reasons(
         satellite_result=mock_satellite_result,
-        industrial_fp=industrial_fp_result,
+        industrial=industrial_result,
     )
     joined = " ".join(reasons)
     assert "[地面增强]" in joined
@@ -35,7 +35,7 @@ def test_ground_reasons_include_industrial(mock_satellite_result, industrial_fp_
 def test_ground_summary_contains_verdict_and_confidence(mock_satellite_result) -> None:
     summary = generate_ground_summary(
         ground_verdict=Verdict.TRUE_FIRE,
-        ground_confidence=0.82,
+        ground_confidence=82.0,
         satellite_result=mock_satellite_result,
     )
     assert "地面增强" in summary

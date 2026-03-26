@@ -9,9 +9,11 @@ import pytest
 from app.api.schemas import (
     EnvironmentalResult,
     FalsePositiveFlag,
+    FirmsMatchLevel,
+    FirmsResult,
     FirePointInput,
-    HistoricalFireResult,
-    IndustrialFalsePositiveResult,
+    IndustrialProximity,
+    IndustrialResult,
     LandCoverResult,
     SatelliteFalsePositiveResult,
     SatelliteResultInput,
@@ -30,9 +32,6 @@ from app.services.heat_source_classifier import (
 
 def _make_sat(
     landcover_code: int = -1,
-    frp: Optional[float] = None,
-    brightness: Optional[float] = None,
-    satellite: str = "TERRA",
     is_daytime: bool = True,
     solar_zenith: float = 45.0,
     fire_season: float = 1.0,
@@ -54,12 +53,9 @@ def _make_sat(
         input_point=FirePointInput(
             latitude=30.0,
             longitude=110.0,
-            satellite=satellite,
-            brightness=brightness,
-            frp=frp,
         ),
         verdict=Verdict.UNCERTAIN,
-        final_confidence=0.5,
+        final_confidence=50.0,
         landcover=landcover,
         false_positive=SatelliteFalsePositiveResult(flags=flags) if flags else None,
         environmental=EnvironmentalResult(
@@ -71,23 +67,23 @@ def _make_sat(
     )
 
 
-def _make_historical(score: float = 0.0, count: int = 0) -> HistoricalFireResult:
-    return HistoricalFireResult(
-        nearby_fire_count=count,
-        nearest_distance_m=None if count == 0 else 1000.0,
-        days_searched=5,
-        score=score,
+def _make_firms(match_level: FirmsMatchLevel = FirmsMatchLevel.NO_HISTORY) -> FirmsResult:
+    return FirmsResult(
+        match_level=match_level,
+        nearest_fire_km=None,
+        nearest_fire_date=None,
         detail="",
     )
 
 
-def _make_industrial(triggered: bool = False) -> IndustrialFalsePositiveResult:
-    return IndustrialFalsePositiveResult(
-        flag=FalsePositiveFlag(
-            detector="industrial",
-            triggered=triggered,
-            penalty=0.8 if triggered else 0.0,
-        )
+def _make_industrial(triggered: bool = False) -> IndustrialResult:
+    proximity = IndustrialProximity.WITHIN_500M if triggered else IndustrialProximity.NONE
+    return IndustrialResult(
+        proximity=proximity,
+        nearest_facility_m=300.0 if triggered else None,
+        facility_type="plant" if triggered else None,
+        is_gas_flare=False,
+        detail="",
     )
 
 
@@ -96,39 +92,39 @@ def _make_industrial(triggered: bool = False) -> IndustrialFalsePositiveResult:
 # ---------------------------------------------------------------------------
 
 class TestVegetationFire:
-    def test_forest_high_frp_fire_season_ranks_first(self):
-        sat = _make_sat(landcover_code=10, frp=60.0, fire_season=1.5, is_daytime=True)
-        hist = _make_historical(score=0.5, count=8)
-        result = classify_heat_sources(sat, hist, _make_industrial(False))
+    def test_forest_fire_season_ranks_first(self):
+        sat = _make_sat(landcover_code=10, fire_season=1.5, is_daytime=True)
+        firms = _make_firms(FirmsMatchLevel.NEARBY_SAME_SEASON)
+        result = classify_heat_sources(sat, firms, _make_industrial(False))
 
         assert result.top_type == HeatSourceType.VEGETATION_FIRE
         assert result.top_probability > 0.5
 
     def test_shrubland_ranks_vegetation(self):
-        sat = _make_sat(landcover_code=20, frp=25.0, fire_season=1.2)
-        result = classify_heat_sources(sat, _make_historical(score=0.4, count=3), None)
+        sat = _make_sat(landcover_code=20, fire_season=1.2)
+        result = classify_heat_sources(sat, _make_firms(FirmsMatchLevel.NEARBY_SAME_SEASON), None)
 
         assert result.top_type == HeatSourceType.VEGETATION_FIRE
 
     def test_industrial_suppresses_vegetation(self):
-        sat = _make_sat(landcover_code=10, frp=60.0, fire_season=1.5)
-        result = classify_heat_sources(sat, _make_historical(), _make_industrial(True))
+        sat = _make_sat(landcover_code=10, fire_season=1.5)
+        result = classify_heat_sources(sat, _make_firms(), _make_industrial(True))
 
         assert result.top_type != HeatSourceType.VEGETATION_FIRE
 
 
 class TestAgriculturalBurning:
-    def test_cropland_moderate_frp_ranks_first(self):
-        sat = _make_sat(landcover_code=40, frp=20.0, fire_season=1.2)
-        result = classify_heat_sources(sat, _make_historical(score=0.2, count=2), None)
+    def test_cropland_ranks_first(self):
+        sat = _make_sat(landcover_code=40, fire_season=1.2)
+        result = classify_heat_sources(sat, _make_firms(FirmsMatchLevel.REGIONAL), None)
 
         assert result.top_type == HeatSourceType.AGRICULTURAL_BURNING
 
     def test_non_cropland_scores_lower(self):
-        sat = _make_sat(landcover_code=40, frp=20.0)
+        sat = _make_sat(landcover_code=40)
         result_crop = classify_heat_sources(sat, None, None)
 
-        sat_forest = _make_sat(landcover_code=10, frp=20.0)
+        sat_forest = _make_sat(landcover_code=10)
         result_forest = classify_heat_sources(sat_forest, None, None)
 
         crop_score = next(
@@ -144,8 +140,8 @@ class TestAgriculturalBurning:
 
 class TestIndustrialHeat:
     def test_industrial_triggered_ranks_first(self):
-        sat = _make_sat(landcover_code=50, frp=120.0, fire_season=0.5)
-        result = classify_heat_sources(sat, _make_historical(), _make_industrial(True))
+        sat = _make_sat(landcover_code=50, fire_season=0.5)
+        result = classify_heat_sources(sat, _make_firms(), _make_industrial(True))
 
         assert result.top_type == HeatSourceType.INDUSTRIAL_HEAT
 
@@ -175,7 +171,7 @@ class TestSunGlint:
             solar_zenith=25.0,
             fire_season=0.8,
         )
-        result = classify_heat_sources(sat, _make_historical(score=-0.5), None)
+        result = classify_heat_sources(sat, _make_firms(FirmsMatchLevel.NO_HISTORY), None)
 
         assert result.top_type == HeatSourceType.SUN_GLINT
         assert result.top_probability > 0.5
@@ -190,7 +186,7 @@ class TestSunGlint:
 class TestWaterReflection:
     def test_water_body_landcover_ranks_first(self):
         sat = _make_sat(landcover_code=80, fp_flags={"water_body": True})
-        result = classify_heat_sources(sat, _make_historical(score=-0.3), None)
+        result = classify_heat_sources(sat, _make_firms(FirmsMatchLevel.NO_HISTORY), None)
 
         assert result.top_type == HeatSourceType.WATER_REFLECTION
 
@@ -198,7 +194,7 @@ class TestWaterReflection:
 class TestCoastalReflection:
     def test_coastal_triggered_ranks_first(self):
         sat = _make_sat(landcover_code=90, fp_flags={"coastal_reflection": True})
-        result = classify_heat_sources(sat, _make_historical(score=-0.2), None)
+        result = classify_heat_sources(sat, _make_firms(FirmsMatchLevel.NO_HISTORY), None)
 
         assert result.top_type == HeatSourceType.COASTAL_REFLECTION
 
@@ -207,11 +203,10 @@ class TestWetlandFire:
     def test_wetland_without_coastal_flag_ranks_first(self):
         sat = _make_sat(
             landcover_code=95,
-            frp=15.0,
             fire_season=1.3,
             fp_flags={"coastal_reflection": False},
         )
-        result = classify_heat_sources(sat, _make_historical(score=0.4, count=4), None)
+        result = classify_heat_sources(sat, _make_firms(FirmsMatchLevel.NEARBY_SAME_SEASON), None)
 
         assert result.top_type == HeatSourceType.WETLAND_FIRE
 
@@ -222,8 +217,8 @@ class TestWetlandFire:
 
 class TestProbabilityDistribution:
     def test_probabilities_sum_to_one(self):
-        sat = _make_sat(landcover_code=10, frp=30.0)
-        result = classify_heat_sources(sat, _make_historical(), None)
+        sat = _make_sat(landcover_code=10)
+        result = classify_heat_sources(sat, _make_firms(), None)
 
         total = sum(c.probability for c in result.ranked_sources)
         assert abs(total - 1.0) < 1e-6
@@ -236,8 +231,8 @@ class TestProbabilityDistribution:
         assert types_returned == set(HeatSourceType)
 
     def test_sorted_descending(self):
-        sat = _make_sat(landcover_code=10, frp=40.0, fire_season=1.4)
-        result = classify_heat_sources(sat, _make_historical(score=0.5, count=5), None)
+        sat = _make_sat(landcover_code=10, fire_season=1.4)
+        result = classify_heat_sources(sat, _make_firms(FirmsMatchLevel.NEARBY_SAME_SEASON), None)
 
         probs = [c.probability for c in result.ranked_sources]
         assert probs == sorted(probs, reverse=True)
@@ -248,43 +243,32 @@ class TestProbabilityDistribution:
 # ---------------------------------------------------------------------------
 
 class TestAreaEstimation:
-    def test_viirs_single_pixel_area(self):
-        area, basis = _estimate_area("SUOMI NPP", HeatSourceType.INDUSTRIAL_HEAT, None, 0)
+    def test_default_pixel_area(self):
+        area, basis = _estimate_area(HeatSourceType.INDUSTRIAL_HEAT, 0)
         assert area == pytest.approx(0.141, abs=1e-4)
         assert "VIIRS" in basis
 
-    def test_modis_single_pixel_area(self):
-        area, basis = _estimate_area("TERRA", HeatSourceType.INDUSTRIAL_HEAT, None, 0)
+    def test_custom_pixel_size(self):
+        area, basis = _estimate_area(HeatSourceType.INDUSTRIAL_HEAT, 0, pixel_km2=1.0, sensor_desc="MODIS (1km)")
         assert area == pytest.approx(1.0, abs=1e-4)
         assert "MODIS" in basis
 
-    def test_default_50m_pixel(self):
-        area, basis = _estimate_area("UNKNOWN_SAT", HeatSourceType.INDUSTRIAL_HEAT, None, 0)
-        assert area == pytest.approx(0.0025, abs=1e-6)
-        assert "50m" in basis
-
-    def test_fire_type_scales_with_frp(self):
-        area_low, _ = _estimate_area("TERRA", HeatSourceType.VEGETATION_FIRE, 10.0, 0)
-        area_high, _ = _estimate_area("TERRA", HeatSourceType.VEGETATION_FIRE, 100.0, 0)
-        assert area_high > area_low
-
     def test_fire_type_scales_with_history(self):
-        area_few, _ = _estimate_area("TERRA", HeatSourceType.VEGETATION_FIRE, 25.0, 2)
-        area_many, _ = _estimate_area("TERRA", HeatSourceType.VEGETATION_FIRE, 25.0, 20)
+        area_few, _ = _estimate_area(HeatSourceType.VEGETATION_FIRE, 2)
+        area_many, _ = _estimate_area(HeatSourceType.VEGETATION_FIRE, 20)
         assert area_many > area_few
 
     def test_fire_area_capped_at_500(self):
-        # Extreme values should not exceed 500 km²
-        area, _ = _estimate_area("TERRA", HeatSourceType.VEGETATION_FIRE, 9999.0, 9999)
+        area, _ = _estimate_area(HeatSourceType.VEGETATION_FIRE, 9999)
         assert area <= 500.0
 
     def test_non_fire_type_uses_single_pixel(self):
-        area_viirs, _ = _estimate_area("SUOMI NPP", HeatSourceType.SUN_GLINT, 50.0, 10)
-        assert area_viirs == pytest.approx(0.141, abs=1e-4)
+        area, _ = _estimate_area(HeatSourceType.SUN_GLINT, 10)
+        assert area == pytest.approx(0.141, abs=1e-4)
 
     def test_area_in_classification_result(self):
-        sat = _make_sat(landcover_code=10, frp=50.0, fire_season=1.4, satellite="AQUA")
-        result = classify_heat_sources(sat, _make_historical(count=5), None)
+        sat = _make_sat(landcover_code=10, fire_season=1.4)
+        result = classify_heat_sources(sat, _make_firms(FirmsMatchLevel.EXACT_MATCH), None)
 
         assert result.estimated_area_km2 > 0
         assert result.area_basis != ""

@@ -1,22 +1,26 @@
 """Ground confidence enhancement engine.
 
 Formula:
-    logit(P_ground) = logit(P_satellite) + β_hist × hist_score - industrial_penalty
+    logit(P_final) = logit(Pₛ/100) + ln(LR_firms) + Δ_industrial
 
-P_satellite is the satellite's final_confidence — NOT recalculated.
-Only adds historical and industrial on top.
+Pₛ is the satellite's final_confidence (0-100) — NOT recalculated.
+LR_firms is looked up from config by FirmsMatchLevel enum.
+Δ_industrial is looked up from config by IndustrialProximity enum.
+Gas flares skip the industrial delta (is_gas_flare=True).
 """
 import logging
 import math
 from typing import Optional
 
 from app.api.schemas import (
+    FirmsMatchLevel,
+    FirmsResult,
     GroundConfidenceBreakdown,
-    HistoricalFireResult,
-    IndustrialFalsePositiveResult,
+    IndustrialProximity,
+    IndustrialResult,
     Verdict,
 )
-from app.config import get_settings
+from app.config import Settings, get_settings
 
 logger = logging.getLogger(__name__)
 
@@ -33,44 +37,66 @@ def _sigmoid(x: float) -> float:
     return 1.0 / (1.0 + math.exp(-x))
 
 
+def _firms_lr(match_level: FirmsMatchLevel, settings: Settings) -> float:
+    """Return likelihood ratio for the given FIRMS match level."""
+    return {
+        FirmsMatchLevel.EXACT_MATCH: settings.firms_lr_exact_match,
+        FirmsMatchLevel.NEARBY_SAME_SEASON: settings.firms_lr_nearby_same_season,
+        FirmsMatchLevel.REGIONAL: settings.firms_lr_regional,
+        FirmsMatchLevel.NO_SEASON_RECORD: settings.firms_lr_no_season_record,
+        FirmsMatchLevel.NO_HISTORY: settings.firms_lr_no_history,
+        FirmsMatchLevel.CONFIRMED_NONE: settings.firms_lr_confirmed_none,
+    }[match_level]
+
+
+def _industrial_delta(proximity: IndustrialProximity, settings: Settings) -> float:
+    """Return logit-space delta for the given industrial proximity level."""
+    return {
+        IndustrialProximity.WITHIN_500M: settings.industrial_delta_within_500m,
+        IndustrialProximity.WITHIN_2KM: settings.industrial_delta_within_2km,
+        IndustrialProximity.WITHIN_5KM: settings.industrial_delta_within_5km,
+        IndustrialProximity.NONE: settings.industrial_delta_none,
+    }[proximity]
+
+
 def compute_ground_confidence(
     satellite_confidence: float,
-    historical: Optional[HistoricalFireResult] = None,
-    industrial_fp: Optional[IndustrialFalsePositiveResult] = None,
+    firms: Optional[FirmsResult] = None,
+    industrial: Optional[IndustrialResult] = None,
 ) -> tuple[float, GroundConfidenceBreakdown]:
     """Compute ground-enhanced confidence.
 
     Args:
-        satellite_confidence: The satellite system's final confidence (P₀ for ground).
-        historical: Historical fire result from FIRMS (provides score in [-1, 1]).
-        industrial_fp: Industrial false positive result from OSM.
+        satellite_confidence: The satellite system's final confidence (0-100).
+        firms: FIRMS historical fire match result.
+        industrial: Industrial facility proximity result.
 
     Returns:
-        Tuple of (ground_confidence, breakdown).
+        Tuple of (ground_confidence 0-100, breakdown).
     """
     settings = get_settings()
 
-    logit_score = _logit(satellite_confidence)
+    logit_score = _logit(satellite_confidence / 100.0)
 
-    # Historical contribution
-    historical_contribution = 0.0
-    if historical is not None:
-        historical_contribution = settings.beta_hist * historical.score
-    logit_score += historical_contribution
+    # FIRMS contribution: ln(LR_firms)
+    firms_contribution = 0.0
+    if firms is not None:
+        lr = _firms_lr(firms.match_level, settings)
+        firms_contribution = math.log(lr)
+    logit_score += firms_contribution
 
-    # Industrial penalty
-    industrial_penalty = 0.0
-    if industrial_fp is not None:
-        industrial_penalty = industrial_fp.flag.penalty
-    logit_score -= industrial_penalty
+    # Industrial contribution: Δ_industrial (skip for gas flares)
+    industrial_contribution = 0.0
+    if industrial is not None and not industrial.is_gas_flare:
+        industrial_contribution = _industrial_delta(industrial.proximity, settings)
+    logit_score += industrial_contribution
 
-    ground_confidence = _sigmoid(logit_score)
-    ground_confidence = round(ground_confidence, 4)
+    ground_confidence = round(_sigmoid(logit_score) * 100.0, 2)
 
     breakdown = GroundConfidenceBreakdown(
         satellite_confidence=satellite_confidence,
-        historical_contribution=round(historical_contribution, 4),
-        industrial_penalty=round(industrial_penalty, 4),
+        firms_contribution=round(firms_contribution, 4),
+        industrial_contribution=round(industrial_contribution, 4),
         final_confidence=ground_confidence,
     )
 
@@ -78,14 +104,16 @@ def compute_ground_confidence(
 
 
 def determine_verdict(confidence: float) -> Verdict:
-    """Determine fire point verdict based on ground confidence.
+    """Determine fire point verdict based on ground confidence (0-100 scale).
 
-    Uses the same thresholds as satellite for consistency.
+    Final thresholds (stricter than satellite-only 70/50):
+        ≥ 75 → TRUE_FIRE
+        < 50 → FALSE_POSITIVE
+        [50, 75) → UNCERTAIN
     """
-    # Ground uses fixed thresholds matching satellite defaults
-    if confidence >= 0.75:
+    if confidence >= 75.0:
         return Verdict.TRUE_FIRE
-    elif confidence < 0.35:
+    elif confidence < 50.0:
         return Verdict.FALSE_POSITIVE
     else:
         return Verdict.UNCERTAIN

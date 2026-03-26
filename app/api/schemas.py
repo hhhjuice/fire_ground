@@ -27,9 +27,6 @@ class FirePointInput(BaseModel):
     """Original fire point from satellite sensor."""
     latitude: float = Field(..., ge=-90, le=90, description="纬度")
     longitude: float = Field(..., ge=-180, le=180, description="经度")
-    satellite: Optional[str] = Field(None, description="卫星来源")
-    brightness: Optional[float] = Field(None, description="亮温值 (K)")
-    frp: Optional[float] = Field(None, ge=0, description="火辐射功率 (MW)")
     confidence: Optional[float] = Field(None, ge=0, le=100, description="卫星原始置信度 (0-100)")
     acquisition_time: Optional[datetime] = Field(None, description="观测时间 (UTC)")
 
@@ -79,13 +76,11 @@ class CoordinateCorrection(BaseModel):
 
 class SatelliteConfidenceBreakdown(BaseModel):
     """Satellite confidence breakdown (received as input)."""
-    initial_confidence: float = Field(0.5, description="初始置信度")
-    landcover_contribution: float = Field(0.0, description="地物类型贡献")
-    environmental_contribution: float = Field(0.0, description="环境因素贡献")
-    brightness_bonus: float = Field(0.0, description="亮温加成")
-    frp_bonus: float = Field(0.0, description="FRP加成")
-    false_positive_penalty: float = Field(0.0, description="假阳性惩罚")
-    final_confidence: float = Field(0.0, ge=0, le=1, description="最终置信度")
+    initial_confidence: float = Field(50.0, description="初始置信度 (0-100)")
+    landcover_contribution: float = Field(0.0, description="地物类型贡献 (logit 空间)")
+    environmental_contribution: float = Field(0.0, description="环境因素贡献 (logit 空间)")
+    false_positive_penalty: float = Field(0.0, description="假阳性惩罚 (logit 空间)")
+    final_confidence: float = Field(0.0, ge=0, le=100, description="最终置信度 (0-100)")
 
 
 # ---------------------------------------------------------------------------
@@ -97,7 +92,7 @@ class SatelliteResultInput(BaseModel):
     input_point: FirePointInput = Field(..., description="输入火点")
 
     verdict: Verdict = Field(..., description="星上判定结果")
-    final_confidence: float = Field(..., ge=0, le=1, description="星上最终置信度")
+    final_confidence: float = Field(..., ge=0, le=100, description="星上最终置信度 (0-100)")
     reasons: list[str] = Field(default_factory=list, description="星上判断原因列表")
     summary: str = Field("", description="星上综合判断摘要")
 
@@ -119,26 +114,47 @@ class EnhanceRequest(BaseModel):
 # Ground sub-results (added by ground system)
 # ---------------------------------------------------------------------------
 
-class HistoricalFireResult(BaseModel):
-    """Historical fire analysis result (ground-only, needs FIRMS API)."""
-    nearby_fire_count: int = Field(0, ge=0, description="历史火点数量")
-    nearest_distance_m: Optional[float] = Field(None, description="最近历史火点距离 (m)")
-    days_searched: int = Field(0, description="搜索天数范围")
-    score: float = Field(0.0, ge=-1, le=1, description="历史火点评分 (-1到1)")
-    detail: str = Field("", description="历史数据分析详情")
+class FirmsMatchLevel(str, Enum):
+    """FIRMS historical fire data spatial/temporal match level."""
+    EXACT_MATCH = "EXACT_MATCH"               # 同位置（1km²），同季节（±1月），3年内
+    NEARBY_SAME_SEASON = "NEARBY_SAME_SEASON"  # 5km内，同季节，5年内
+    REGIONAL = "REGIONAL"                      # 10km内，任意时间
+    NO_SEASON_RECORD = "NO_SEASON_RECORD"      # 火灾高发季节，50km内无记录
+    NO_HISTORY = "NO_HISTORY"                  # 50km内无任何历史火点
+    CONFIRMED_NONE = "CONFIRMED_NONE"          # 确认无火灾区域
 
 
-class IndustrialFalsePositiveResult(BaseModel):
-    """Industrial false positive result (ground-only, needs OSM)."""
-    flag: FalsePositiveFlag = Field(..., description="工业热源检测结果")
+class FirmsResult(BaseModel):
+    """FIRMS historical fire data match result."""
+    match_level: FirmsMatchLevel = Field(..., description="FIRMS 时空匹配等级")
+    nearest_fire_km: Optional[float] = Field(None, ge=0, description="最近历史火点距离 (km)")
+    nearest_fire_date: Optional[datetime] = Field(None, description="最近历史火点日期")
+    detail: str = Field("", description="详情说明")
+
+
+class IndustrialProximity(str, Enum):
+    """Nearest industrial heat-source proximity class."""
+    WITHIN_500M = "WITHIN_500M"
+    WITHIN_2KM = "WITHIN_2KM"
+    WITHIN_5KM = "WITHIN_5KM"
+    NONE = "NONE"                              # 10km内无工业设施
+
+
+class IndustrialResult(BaseModel):
+    """Industrial facility proximity detection result."""
+    proximity: IndustrialProximity = Field(..., description="最近工业设施距离等级")
+    nearest_facility_m: Optional[float] = Field(None, ge=0, description="最近工业设施距离 (m)")
+    facility_type: Optional[str] = Field(None, description="设施类型（电厂/钢铁厂/化工厂等）")
+    is_gas_flare: bool = Field(False, description="是否为油气火炬（真实燃烧源，不施加惩罚）")
+    detail: str = Field("", description="详情说明")
 
 
 class GroundConfidenceBreakdown(BaseModel):
     """Ground confidence breakdown — shows what ground system added."""
-    satellite_confidence: float = Field(..., description="星上置信度 (P₀ for ground)")
-    historical_contribution: float = Field(0.0, description="历史数据贡献")
-    industrial_penalty: float = Field(0.0, description="工业热源惩罚")
-    final_confidence: float = Field(0.0, ge=0, le=1, description="地面最终置信度")
+    satellite_confidence: float = Field(..., ge=0, le=100, description="星上置信度 (0-100)")
+    firms_contribution: float = Field(0.0, description="FIRMS 历史数据贡献 (logit 空间)")
+    industrial_contribution: float = Field(0.0, description="工业设施修正 (logit 空间)")
+    final_confidence: float = Field(0.0, ge=0, le=100, description="地面最终置信度 (0-100)")
 
 
 # ---------------------------------------------------------------------------
@@ -174,13 +190,13 @@ class GroundEnhancedResult(BaseModel):
 
     # Ground verdict (may differ from satellite)
     ground_verdict: Verdict = Field(..., description="地面判定结果")
-    ground_confidence: float = Field(..., ge=0, le=1, description="地面最终置信度")
+    ground_confidence: float = Field(..., ge=0, le=100, description="地面最终置信度 (0-100)")
     ground_reasons: list[str] = Field(default_factory=list, description="地面增强原因列表")
     ground_summary: str = Field("", description="地面增强摘要")
 
     # Ground-only analysis results
-    historical: Optional[HistoricalFireResult] = Field(None, description="历史数据分析")
-    industrial_fp: Optional[IndustrialFalsePositiveResult] = Field(None, description="工业热源检测")
+    firms: Optional[FirmsResult] = Field(None, description="FIRMS 历史数据分析")
+    industrial: Optional[IndustrialResult] = Field(None, description="工业设施检测")
     ground_confidence_breakdown: Optional[GroundConfidenceBreakdown] = Field(None, description="地面置信度分解")
 
     # Geocoding (ground-only, needs Nominatim)

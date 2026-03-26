@@ -13,7 +13,6 @@ from __future__ import annotations
 import asyncio
 import logging
 import time
-from typing import Optional
 
 from app.api.schemas import (
     EnhanceResponse,
@@ -56,20 +55,16 @@ async def enhance_single_point(sat_result: SatelliteResultInput) -> GroundEnhanc
         lon = sat_result.input_point.longitude
 
     # --- Parallel phase: all ground-only services ---
-    historical_task = asyncio.create_task(get_historical_fires(lat, lon))
-    industrial_task = asyncio.create_task(detect_industrial_heat(lat, lon))
-    geocoding_task = asyncio.create_task(reverse_geocode(lat, lon))
-
-    historical_result, industrial_result, geocoding_result = await asyncio.gather(
-        historical_task,
-        industrial_task,
-        geocoding_task,
+    firms_result, industrial_result, geocoding_result = await asyncio.gather(
+        get_historical_fires(lat, lon),
+        detect_industrial_heat(lat, lon),
+        reverse_geocode(lat, lon),
         return_exceptions=True,
     )
 
-    if isinstance(historical_result, BaseException):
-        logger.warning("Historical fire service failed: %s", historical_result)
-        historical_result = None
+    if isinstance(firms_result, BaseException):
+        logger.warning("Historical fire service failed: %s", firms_result)
+        firms_result = None
     if isinstance(industrial_result, BaseException):
         logger.warning("Industrial FP detection failed: %s", industrial_result)
         industrial_result = None
@@ -80,8 +75,8 @@ async def enhance_single_point(sat_result: SatelliteResultInput) -> GroundEnhanc
     # --- Fusion: compute ground confidence ---
     ground_confidence, confidence_breakdown = compute_ground_confidence(
         satellite_confidence=sat_result.final_confidence,
-        historical=historical_result,
-        industrial_fp=industrial_result,
+        firms=firms_result,
+        industrial=industrial_result,
     )
 
     ground_verdict = determine_verdict(ground_confidence)
@@ -89,23 +84,23 @@ async def enhance_single_point(sat_result: SatelliteResultInput) -> GroundEnhanc
     # --- Reason and summary generation ---
     ground_reasons = generate_ground_reasons(
         satellite_result=sat_result,
-        historical=historical_result,
-        industrial_fp=industrial_result,
+        firms=firms_result,
+        industrial=industrial_result,
     )
 
     ground_summary = generate_ground_summary(
         ground_verdict=ground_verdict,
         ground_confidence=ground_confidence,
         satellite_result=sat_result,
-        historical=historical_result,
-        industrial_fp=industrial_result,
+        firms=firms_result,
+        industrial=industrial_result,
     )
 
     # --- Heat source classification and area estimation ---
     classification_result = classify_heat_sources(
         sat_result=sat_result,
-        historical=historical_result,
-        industrial_fp=industrial_result,
+        firms=firms_result,
+        industrial=industrial_result,
     )
     heat_source_classification = HeatSourceClassificationSchema(
         ranked_sources=[
@@ -132,8 +127,8 @@ async def enhance_single_point(sat_result: SatelliteResultInput) -> GroundEnhanc
         ground_confidence=ground_confidence,
         ground_reasons=ground_reasons,
         ground_summary=ground_summary,
-        historical=historical_result,
-        industrial_fp=industrial_result,
+        firms=firms_result,
+        industrial=industrial_result,
         ground_confidence_breakdown=confidence_breakdown,
         geocoding_address=geocoding_result,
         heat_source_classification=heat_source_classification,
@@ -155,15 +150,16 @@ async def enhance_batch(results: list[SatelliteResultInput]) -> EnhanceResponse:
     for i, result in enumerate(enhanced):
         if isinstance(result, BaseException):
             logger.error("Point %d enhancement failed: %s", i, result)
+            sat = results[i]
             valid_results.append(
                 GroundEnhancedResult(
-                    satellite_result=results[i],
-                    ground_verdict=results[i].verdict,
-                    ground_confidence=results[i].final_confidence,
-                    ground_reasons=list(results[i].reasons) + ["[地面增强] 增强过程发生错误，保留星上判定"],
-                    ground_summary=f"地面增强失败，保留星上判定结果（置信度{results[i].final_confidence:.1%}）。",
-                    historical=None,
-                    industrial_fp=None,
+                    satellite_result=sat,
+                    ground_verdict=sat.verdict,
+                    ground_confidence=sat.final_confidence,
+                    ground_reasons=list(sat.reasons) + ["[地面增强] 增强过程发生错误，保留星上判定"],
+                    ground_summary=f"地面增强失败，保留星上判定结果（置信度{sat.final_confidence:.1f}）。",
+                    firms=None,
+                    industrial=None,
                     ground_confidence_breakdown=None,
                     geocoding_address=None,
                     processing_time_ms=0.0,
