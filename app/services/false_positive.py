@@ -31,16 +31,6 @@ async def detect_industrial_heat(lat: float, lon: float) -> IndustrialResult:
     """
     pois = await query_industrial_pois(lat, lon, radius_m=_WITHIN_5KM)
 
-    if not pois:
-        return IndustrialResult(
-            proximity=IndustrialProximity.NONE,
-            nearest_facility_m=None,
-            facility_type=None,
-            is_gas_flare=False,
-            detail="5km内未发现工业设施",
-        )
-
-    # Find nearest POI with valid coordinates
     nearest_poi: Optional[dict] = None
     nearest_dist_m: float = float("inf")
 
@@ -60,7 +50,7 @@ async def detect_industrial_heat(lat: float, lon: float) -> IndustrialResult:
             nearest_facility_m=None,
             facility_type=None,
             is_gas_flare=False,
-            detail="5km内未发现有效工业设施",
+            detail="5km内未发现工业设施",
         )
 
     proximity = _proximity_from_distance(nearest_dist_m)

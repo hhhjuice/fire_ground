@@ -107,7 +107,6 @@ def classify_heat_sources(
     positive flags, environmental conditions, and ground enhancement data.
     Scores are converted to probabilities via softmax (numerically stable).
     """
-    # --- Safe extraction of satellite fields ---
     landcover_code: int = sat_result.landcover.class_code if sat_result.landcover else -1
 
     # Build a detector-name → triggered lookup from satellite false-positive flags
@@ -137,7 +136,6 @@ def classify_heat_sources(
         industrial.proximity != IndustrialProximity.NONE if industrial else False
     )
 
-    # --- Score each category (additive rule model) ---
     scores: dict[HeatSourceType, float] = {t: 0.0 for t in HeatSourceType}
 
     # vegetation_fire ─────────────────────────────────────────────────────────

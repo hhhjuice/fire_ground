@@ -43,7 +43,6 @@ async def enhance_single_point(sat_result: SatelliteResultInput) -> GroundEnhanc
     """
     start_time = time.monotonic()
 
-    # Use corrected coordinates if satellite applied correction
     if (
         sat_result.coordinate_correction is not None
         and sat_result.coordinate_correction.correction_applied
@@ -170,17 +169,20 @@ async def enhance_batch(results: list[SatelliteResultInput]) -> EnhanceResponse:
 
     elapsed_ms = (time.monotonic() - start_time) * 1000
 
+    true_fire = false_positive = uncertain = 0
+    for r in valid_results:
+        if r.ground_verdict == Verdict.TRUE_FIRE:
+            true_fire += 1
+        elif r.ground_verdict == Verdict.FALSE_POSITIVE:
+            false_positive += 1
+        else:
+            uncertain += 1
+
     return EnhanceResponse(
         results=valid_results,
         total_points=len(valid_results),
-        true_fire_count=sum(
-            1 for r in valid_results if r.ground_verdict == Verdict.TRUE_FIRE
-        ),
-        false_positive_count=sum(
-            1 for r in valid_results if r.ground_verdict == Verdict.FALSE_POSITIVE
-        ),
-        uncertain_count=sum(
-            1 for r in valid_results if r.ground_verdict == Verdict.UNCERTAIN
-        ),
+        true_fire_count=true_fire,
+        false_positive_count=false_positive,
+        uncertain_count=uncertain,
         total_processing_time_ms=round(elapsed_ms, 1),
     )

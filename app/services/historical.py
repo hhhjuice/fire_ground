@@ -39,8 +39,7 @@ async def _query_source(
         text = resp.text.strip()
         if not text or text.startswith("<!") or text.lower().startswith("invalid"):
             return []
-        reader = csv.DictReader(StringIO(text))
-        return [r for r in reader if r]
+        return list(csv.DictReader(StringIO(text)))
     except Exception as e:
         logger.warning("FIRMS query failed (source=%s days=%d): %s", source, days, e)
         return []
@@ -131,8 +130,7 @@ def _classify_match_level(
             detail="搜索范围内无有效历史火点记录",
         )
 
-    distances.sort(key=lambda x: x[0])
-    nearest_km, nearest_date = distances[0]
+    nearest_km, nearest_date = min(distances, key=lambda x: x[0])
 
     if nearest_km < _EXACT_KM:
         match_level = FirmsMatchLevel.EXACT_MATCH
