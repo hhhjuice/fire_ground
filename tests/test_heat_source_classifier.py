@@ -91,7 +91,7 @@ def _make_industrial(triggered: bool = False) -> IndustrialResult:
 class TestVegetationFire:
     def test_forest_fire_season_ranks_first(self):
         sat = _make_sat(landcover_code=10, fire_season=1.5, is_daytime=True)
-        firms = _make_firms(FirmsMatchLevel.NEARBY_SAME_SEASON)
+        firms = _make_firms(FirmsMatchLevel.NEARBY)
         result = classify_heat_sources(sat, firms, _make_industrial(False))
 
         assert result.top_type == HeatSourceType.VEGETATION_FIRE
@@ -99,7 +99,7 @@ class TestVegetationFire:
 
     def test_shrubland_ranks_vegetation(self):
         sat = _make_sat(landcover_code=20, fire_season=1.2)
-        result = classify_heat_sources(sat, _make_firms(FirmsMatchLevel.NEARBY_SAME_SEASON), None)
+        result = classify_heat_sources(sat, _make_firms(FirmsMatchLevel.NEARBY), None)
 
         assert result.top_type == HeatSourceType.VEGETATION_FIRE
 
@@ -203,7 +203,7 @@ class TestWetlandFire:
             fire_season=1.3,
             fp_flags={"coastal_reflection": False},
         )
-        result = classify_heat_sources(sat, _make_firms(FirmsMatchLevel.NEARBY_SAME_SEASON), None)
+        result = classify_heat_sources(sat, _make_firms(FirmsMatchLevel.NEARBY), None)
 
         assert result.top_type == HeatSourceType.WETLAND_FIRE
 
@@ -229,7 +229,7 @@ class TestProbabilityDistribution:
 
     def test_sorted_descending(self):
         sat = _make_sat(landcover_code=10, fire_season=1.4)
-        result = classify_heat_sources(sat, _make_firms(FirmsMatchLevel.NEARBY_SAME_SEASON), None)
+        result = classify_heat_sources(sat, _make_firms(FirmsMatchLevel.NEARBY), None)
 
         probs = [c.probability for c in result.ranked_sources]
         assert probs == sorted(probs, reverse=True)

@@ -116,13 +116,11 @@ class EnhanceRequest(BaseModel):
 # ---------------------------------------------------------------------------
 
 class FirmsMatchLevel(str, Enum):
-    """FIRMS historical fire data spatial/temporal match level."""
-    EXACT_MATCH = "EXACT_MATCH"               # 同位置（1km²），同季节（±1月），3年内
-    NEARBY_SAME_SEASON = "NEARBY_SAME_SEASON"  # 5km内，同季节，5年内
-    REGIONAL = "REGIONAL"                      # 10km内，任意时间
-    NO_SEASON_RECORD = "NO_SEASON_RECORD"      # 火灾高发季节，50km内无记录
-    NO_HISTORY = "NO_HISTORY"                  # 50km内无任何历史火点
-    CONFIRMED_NONE = "CONFIRMED_NONE"          # 确认无火灾区域
+    """FIRMS NRT fire data spatial match level (5-day window)."""
+    EXACT_MATCH = "EXACT_MATCH"    # 1km内有近期火点记录
+    NEARBY = "NEARBY"              # 5km内有近期火点记录
+    REGIONAL = "REGIONAL"          # 10km内有近期火点记录
+    NO_HISTORY = "NO_HISTORY"      # 10km内无火点记录
 
 
 class FirmsResult(BaseModel):

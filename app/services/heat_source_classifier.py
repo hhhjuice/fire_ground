@@ -50,11 +50,9 @@ _LABEL_ZH: dict[HeatSourceType, str] = {
 # Map FirmsMatchLevel to a proxy score for scoring
 _FIRMS_SCORE: dict[FirmsMatchLevel, float] = {
     FirmsMatchLevel.EXACT_MATCH: 1.0,
-    FirmsMatchLevel.NEARBY_SAME_SEASON: 0.7,
+    FirmsMatchLevel.NEARBY: 0.7,
     FirmsMatchLevel.REGIONAL: 0.3,
-    FirmsMatchLevel.NO_SEASON_RECORD: -0.2,
     FirmsMatchLevel.NO_HISTORY: -0.3,
-    FirmsMatchLevel.CONFIRMED_NONE: -0.5,
 }
 
 

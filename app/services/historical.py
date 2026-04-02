@@ -136,8 +136,8 @@ def _classify_match_level(
         match_level = FirmsMatchLevel.EXACT_MATCH
         detail = f"同位置1km内发现历史火点，距离{nearest_km:.2f}km"
     elif nearest_km < _NEARBY_KM:
-        match_level = FirmsMatchLevel.NEARBY_SAME_SEASON
-        detail = f"5km内发现历史火点，距离{nearest_km:.2f}km"
+        match_level = FirmsMatchLevel.NEARBY
+        detail = f"5km内发现近期火点，距离{nearest_km:.2f}km"
     elif nearest_km < _REGIONAL_KM:
         match_level = FirmsMatchLevel.REGIONAL
         detail = f"10km内发现历史火点，距离{nearest_km:.2f}km"

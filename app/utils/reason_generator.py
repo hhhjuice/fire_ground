@@ -14,12 +14,10 @@ from app.api.schemas import (
 )
 
 _FIRMS_REASON: dict[FirmsMatchLevel, str] = {
-    FirmsMatchLevel.EXACT_MATCH: "历史数据显示同位置1km内近期有火灾记录",
-    FirmsMatchLevel.NEARBY_SAME_SEASON: "历史数据显示5km内同季节有火灾记录",
-    FirmsMatchLevel.REGIONAL: "历史数据显示10km内有区域性火灾记录",
-    FirmsMatchLevel.NO_SEASON_RECORD: "当前为火灾高发季节，但50km内无历史火点记录",
-    FirmsMatchLevel.NO_HISTORY: "搜索范围内无历史火点记录",
-    FirmsMatchLevel.CONFIRMED_NONE: "该区域为确认无火灾区域（常年沙漠/水体/冰雪）",
+    FirmsMatchLevel.EXACT_MATCH: "FIRMS 数据显示同位置1km内近5天有火灾记录",
+    FirmsMatchLevel.NEARBY: "FIRMS 数据显示5km内近5天有火灾记录",
+    FirmsMatchLevel.REGIONAL: "FIRMS 数据显示10km内近5天有区域性火灾记录",
+    FirmsMatchLevel.NO_HISTORY: "FIRMS 近5天数据在10km内无火点记录",
 }
 
 _VERDICT_TEXT: dict[Verdict, str] = {

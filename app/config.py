@@ -22,11 +22,9 @@ class Settings(BaseSettings):
 
     # FIRMS likelihood ratios per FirmsMatchLevel (used as ln(LR) in logit space)
     firms_lr_exact_match: float = 4.0
-    firms_lr_nearby_same_season: float = 2.5
+    firms_lr_nearby: float = 2.5
     firms_lr_regional: float = 1.5
-    firms_lr_no_season_record: float = 0.8
     firms_lr_no_history: float = 0.5
-    firms_lr_confirmed_none: float = 0.3
 
     # Industrial facility delta per IndustrialProximity (logit space)
     industrial_delta_within_500m: float = -2.5

@@ -41,11 +41,9 @@ def _firms_lr(match_level: FirmsMatchLevel, settings: Settings) -> float:
     """Return likelihood ratio for the given FIRMS match level."""
     return {
         FirmsMatchLevel.EXACT_MATCH: settings.firms_lr_exact_match,
-        FirmsMatchLevel.NEARBY_SAME_SEASON: settings.firms_lr_nearby_same_season,
+        FirmsMatchLevel.NEARBY: settings.firms_lr_nearby,
         FirmsMatchLevel.REGIONAL: settings.firms_lr_regional,
-        FirmsMatchLevel.NO_SEASON_RECORD: settings.firms_lr_no_season_record,
         FirmsMatchLevel.NO_HISTORY: settings.firms_lr_no_history,
-        FirmsMatchLevel.CONFIRMED_NONE: settings.firms_lr_confirmed_none,
     }[match_level]
 
 

@@ -36,10 +36,10 @@ def mock_satellite_result() -> SatelliteResultInput:
 @pytest.fixture
 def positive_firms_result() -> FirmsResult:
     return FirmsResult(
-        match_level=FirmsMatchLevel.NEARBY_SAME_SEASON,
+        match_level=FirmsMatchLevel.NEARBY,
         nearest_fire_km=3.2,
         nearest_fire_date=None,
-        detail="5km内发现历史火点，距离3.20km",
+        detail="5km内发现近期火点，距离3.20km",
     )
 
 

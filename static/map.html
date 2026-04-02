@@ -965,8 +965,8 @@
             // FIRMS historical
             const firms = res.firms;
             if (firms) {
-                const positiveMatches = ['EXACT_MATCH', 'NEARBY_SAME_SEASON', 'REGIONAL'];
-                const negativeMatches = ['NO_SEASON_RECORD', 'NO_HISTORY', 'CONFIRMED_NONE'];
+                const positiveMatches = ['EXACT_MATCH', 'NEARBY', 'REGIONAL'];
+                const negativeMatches = ['NO_HISTORY'];
                 const isPositive = positiveMatches.includes(firms.match_level);
                 const isNegative = negativeMatches.includes(firms.match_level);
                 const matchChip = isPositive
