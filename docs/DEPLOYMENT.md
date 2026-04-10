@@ -105,7 +105,7 @@ python -c "import fastapi, httpx, aiosqlite, pydantic; print('依赖安装成功
 
 ### 3.4 创建数据目录
 
-SQLite 数据库将在启动时自动创建于 `data/` 目录，首次启动前需确认目录存在：
+SQLite 数据库将在启动时自动创建并初始化表结构，但当前代码不会主动创建 `GROUND_DB_PATH` 缺失的父目录。首次启动前请确保数据库文件所在目录存在：
 
 ```bash
 mkdir -p data
@@ -153,29 +153,23 @@ cp .env.example .env
 编辑 `.env` 文件：
 
 ```ini
-# ── NASA FIRMS 配置 ────────────────────────────────────────
-# NASA FIRMS Map Key（务必替换为正式申请的 Key）
-GROUND_FIRMS_MAP_KEY=your_key_here
+# ── 必填 / 常用配置 ────────────────────────────────────────
+# NASA FIRMS Map Key（生产环境务必替换 DEMO_KEY）
+GROUND_FIRMS_MAP_KEY=your_firms_map_key_here
 
-# FIRMS API 地址（通常不需修改）
-GROUND_FIRMS_BASE_URL=https://firms.modaps.eosdis.nasa.gov/api/area/csv
+# ── FIRMS 匹配等级对应的 LR 配置 ────────────────────────────
+# 地面置信度计算会根据 FIRMS 匹配等级取 ln(LR)
+GROUND_FIRMS_LR_EXACT_MATCH=4.0
+GROUND_FIRMS_LR_NEARBY=2.5
+GROUND_FIRMS_LR_REGIONAL=1.5
+GROUND_FIRMS_LR_NO_HISTORY=0.5
 
-# ── OSM Overpass 配置 ──────────────────────────────────────
-# OSM Overpass API 地址（可替换为自建实例以提升稳定性）
-GROUND_OVERPASS_URL=https://overpass-api.de/api/interpreter
-
-# ── Nominatim 地理编码配置 ─────────────────────────────────
-# Nominatim 地址（可替换为自建实例以遵守 OSM 使用条款）
-GROUND_NOMINATIM_URL=https://nominatim.openstreetmap.org/reverse
-
-# ── 置信度权重参数 ─────────────────────────────────────────
-# 历史火点数据在 logit 空间的贡献权重
-# 较大值 → 历史数据影响更大；较小值 → 历史数据影响较弱
-GROUND_BETA_HIST=0.3
-
-# 工业设施假阳性惩罚值（在 logit 空间直接减去）
-# 较大值 → 工业设施附近的火点更容易被判为假阳性
-GROUND_FP_PENALTY_INDUSTRIAL=0.8
+# ── 工业设施距离等级对应的 logit 修正 ──────────────────────
+# 负值表示惩罚；NONE 为附近无工业设施时的小幅正向修正
+GROUND_INDUSTRIAL_DELTA_WITHIN_500M=-2.5
+GROUND_INDUSTRIAL_DELTA_WITHIN_2KM=-1.5
+GROUND_INDUSTRIAL_DELTA_WITHIN_5KM=-0.8
+GROUND_INDUSTRIAL_DELTA_NONE=0.3
 
 # ── 缓存配置 ──────────────────────────────────────────────
 # FIRMS 查询结果缓存有效期（秒）
@@ -191,6 +185,11 @@ GROUND_DB_PATH=data/fire_ground.db
 # ── HTTP 客户端配置 ───────────────────────────────────────
 # 外部 API 请求超时时间（秒）
 GROUND_HTTP_TIMEOUT=10.0
+
+# ── 高级可选覆盖（代码支持，通常无需修改） ────────────────
+GROUND_FIRMS_BASE_URL=https://firms.modaps.eosdis.nasa.gov/api/area/csv
+GROUND_OVERPASS_URL=https://overpass-api.de/api/interpreter
+GROUND_NOMINATIM_URL=https://nominatim.openstreetmap.org/reverse
 ```
 
 ### 5.3 环境变量优先级
@@ -258,7 +257,44 @@ sudo systemctl start fire-ground
 sudo systemctl status fire-ground
 ```
 
-### 6.4 验证启动成功
+### 6.5 容器运行时镜像（仓库自带）
+
+仓库提供了运行时镜像定义：`docker/Dockerfile.runtime` + `docker/start.sh`。
+
+特点：
+
+- 镜像只安装运行依赖，不内置项目代码
+- 默认要求将项目目录挂载到 `/workspace/fire_ground`
+- 默认启动命令为单进程 `uvicorn app.main:app --host $HOST --port $PORT`
+- 可通过环境变量覆盖代码目录与入口模块
+
+构建示例：
+
+```bash
+docker build \
+  -f docker/Dockerfile.runtime \
+  --build-arg BASE_IMAGE=python:3.11-slim \
+  -t fire-ground-runtime .
+```
+
+运行示例：
+
+```bash
+docker run --rm -p 8001:8001 \
+  -v "$(pwd)":/workspace/fire_ground \
+  -e HOST=0.0.0.0 \
+  -e PORT=8001 \
+  fire-ground-runtime
+```
+
+可选覆盖环境变量：
+
+- `CODE_DIR`：代码目录（默认 `/workspace/fire_ground`）
+- `APP_MODULE`：ASGI 入口（默认 `app.main:app`）
+- `HOST`：监听地址（默认 `0.0.0.0`）
+- `PORT`：监听端口（默认 `8001`）
+
+### 6.6 验证启动成功
 
 ```bash
 curl http://localhost:8001/api/health
@@ -295,15 +331,12 @@ curl -X POST http://localhost:8001/api/enhance \
         "input_point": {
           "latitude": 28.5,
           "longitude": 116.3,
-          "satellite": "VIIRS",
-          "brightness": 345.2,
-          "frp": 25.8,
           "confidence": 80,
           "acquisition_time": "2026-03-11T06:00:00Z"
         },
         "verdict": "TRUE_FIRE",
-        "final_confidence": 0.84,
-        "reasons": ["地物类型为草地，属于高火灾风险区域", "高亮温 (345.2K > 340K)，为活跃火点增加置信度"],
+        "final_confidence": 84.0,
+        "reasons": ["地物类型为草地，属于高火灾风险区域"],
         "summary": "星上主判结果为真实火点，最终置信度 84.0%。",
         "coordinate_correction": {
           "original_lat": 28.5,
@@ -317,7 +350,7 @@ curl -X POST http://localhost:8001/api/enhance \
         "landcover": {
           "class_code": 30,
           "class_name": "草地",
-          "likelihood_ratio": 3.0,
+          "likelihood_ratio": 4.0,
           "description": "ESA WorldCover 2021: 草地 (编码30)"
         },
         "false_positive": {
@@ -332,7 +365,14 @@ curl -X POST http://localhost:8001/api/enhance \
           "env_score": 0.15,
           "detail": "白天观测，夏季北半球"
         },
-        "confidence_breakdown": null,
+        "confidence_breakdown": {
+          "initial_confidence": 80.0,
+          "landcover_contribution": 1.3863,
+          "environmental_contribution": 0.075,
+          "false_positive_penalty": 0.0,
+          "final_confidence": 84.0
+        },
+        "fire_area_m2": 30000.0,
         "processing_time_ms": 38.5
       }
     ]
@@ -349,7 +389,7 @@ curl -X POST http://localhost:8001/api/enhance \
       {
         "input_point": {"latitude": 28.5, "longitude": 116.3},
         "verdict": "TRUE_FIRE",
-        "final_confidence": 0.84,
+        "final_confidence": 84.0,
         "reasons": [],
         "summary": "星上主判结果为真实火点",
         "coordinate_correction": null,
@@ -357,6 +397,7 @@ curl -X POST http://localhost:8001/api/enhance \
         "false_positive": {"flags": [], "total_penalty": 0.0, "is_likely_false_positive": false},
         "environmental": null,
         "confidence_breakdown": null,
+        "fire_area_m2": null,
         "processing_time_ms": 0
       }
     ]
@@ -387,16 +428,18 @@ curl -X POST http://localhost:8001/api/enhance \
 | ------------------------- | ------------ | ---- | ------------------------------------------------------------ |
 | `input_point.latitude`  | float        | ✅   | 纬度                                                         |
 | `input_point.longitude` | float        | ✅   | 经度                                                         |
-| `input_point.*`         | 各类型       | 否   | 其他传感器参数（原样透传至响应）                             |
+| `input_point.confidence` | float\|null | 否   | 原始传感器置信度（0~100）                                   |
+| `input_point.acquisition_time` | string\|null | 否 | 观测时间（ISO 8601 UTC）                                     |
 | `verdict`               | string       | ✅   | 星上判定：`TRUE_FIRE` / `UNCERTAIN` / `FALSE_POSITIVE` |
-| `final_confidence`      | float        | ✅   | 星上最终置信度（0~1），作为地面增强的起点                    |
-| `reasons`               | array        | ✅   | 星上判定原因列表（地面增强后追加地面原因）                   |
+| `final_confidence`      | float        | ✅   | 星上最终置信度（0~100），作为地面增强的起点                  |
+| `reasons`               | array        | ✅   | 星上判定原因列表（地面增强后会保留并追加地面原因）           |
 | `summary`               | string       | ✅   | 星上综合摘要                                                 |
 | `coordinate_correction` | object\|null | 否   | 星上坐标修正信息，若修正则地面查询修正后坐标                 |
 | `landcover`             | object\|null | 否   | 星上地物分析结果（透传）                                     |
-| `false_positive`        | object       | ✅   | 星上假阳性检测结果                                           |
+| `false_positive`        | object\|null | 否   | 星上假阳性检测结果                                           |
 | `environmental`         | object\|null | 否   | 星上环境因素分析（透传）                                     |
 | `confidence_breakdown`  | object\|null | 否   | 星上置信度分解（透传）                                       |
+| `fire_area_m2`          | float\|null | 否   | 星上火点估算面积（m²），地面系统直接透传                     |
 | `processing_time_ms`    | float        | ✅   | 星上处理耗时（ms）                                           |
 
 **响应示例：**
@@ -407,34 +450,42 @@ curl -X POST http://localhost:8001/api/enhance \
     {
       "satellite_result": { "...原始星上结果（完整透传）..." },
       "ground_verdict": "TRUE_FIRE",
-      "ground_confidence": 0.88,
+      "ground_confidence": 88.7,
       "ground_reasons": [
         "地物类型为草地，属于高火灾风险区域",
-        "[地面增强] 过去5天内半径5km范围发现 3 个历史火点，最近距离 800m"
+        "[地面增强] FIRMS 数据显示5km内近5天有火灾记录",
+        "[地面增强] 周边未发现工业设施"
       ],
-      "ground_summary": "地面增强判定为真实火点，最终置信度 88.0%。",
-      "historical": {
-        "nearby_fire_count": 3,
-        "nearest_distance_m": 800.0,
-        "days_searched": 30,
-        "score": 0.52,
-        "detail": "过去30天内半径5km范围发现3个历史火点，最近距离800m"
+      "ground_summary": "地面增强分析判定为真实火点，最终置信度88.7%（星上置信度84.0%）。FIRMS 数据显示5km内近5天有火灾记录。",
+      "firms": {
+        "match_level": "NEARBY",
+        "nearest_fire_km": 0.8,
+        "nearest_fire_date": "2026-03-10T00:00:00",
+        "detail": "5km内发现近期火点，距离0.80km"
       },
-      "industrial_fp": {
-        "flag": {
-          "detector": "industrial_facility",
-          "triggered": false,
-          "penalty": 0.0,
-          "detail": null
-        }
+      "industrial": {
+        "proximity": "NONE",
+        "nearest_facility_m": null,
+        "facility_type": null,
+        "is_gas_flare": false,
+        "detail": "5km内未发现工业设施"
       },
       "ground_confidence_breakdown": {
-        "satellite_confidence": 0.84,
-        "historical_contribution": 0.156,
-        "industrial_penalty": 0.0,
-        "final_confidence": 0.88
+        "satellite_confidence": 84.0,
+        "firms_contribution": 0.9163,
+        "industrial_contribution": 0.3,
+        "final_confidence": 88.7
       },
       "geocoding_address": "中国江西省南昌市青山湖区",
+      "heat_source_classification": {
+        "top_type": "vegetation_fire",
+        "top_label_zh": "植被火灾",
+        "top_probability": 0.7231,
+        "ranked_sources": [
+          { "type": "vegetation_fire", "label_zh": "植被火灾", "probability": 0.7231, "raw_score": 4.3 },
+          { "type": "agricultural_burning", "label_zh": "农业焚烧", "probability": 0.1542, "raw_score": 1.8 }
+        ]
+      },
       "processing_time_ms": 1430.5
     }
   ],
@@ -452,16 +503,16 @@ curl -X POST http://localhost:8001/api/enhance \
 | --------------------------------- | ----------------------------------------------------------------------- |
 | `satellite_result`              | 完整的星上原始结果（原样透传）                                          |
 | `ground_verdict`                | 地面增强最终判定                                                        |
-| `ground_confidence`             | 地面增强最终置信度（0~1）                                               |
+| `ground_confidence`             | 地面增强最终置信度（0~100）                                             |
 | `ground_reasons`                | 合并后的原因列表：星上原因 + 地面增强原因（以 `[地面增强]` 前缀区分） |
 | `ground_summary`                | 地面综合摘要                                                            |
-| `historical.nearby_fire_count`  | 范围内历史火点数量                                                      |
-| `historical.nearest_distance_m` | 最近历史火点距离（米），无记录时为 null                                 |
-| `historical.score`              | 历史火点得分（-1 ~ 1），正值提升置信度，负值降低                        |
-| `industrial_fp.flag.triggered`  | 是否命中工业设施检测器                                                  |
-| `industrial_fp.flag.penalty`    | 工业设施惩罚值（0 或配置的 `GROUND_FP_PENALTY_INDUSTRIAL`）           |
-| `ground_confidence_breakdown`   | 地面置信度分解：星上置信度 + 历史贡献 - 工业惩罚                        |
+| `firms.match_level`             | FIRMS 匹配等级：`EXACT_MATCH` / `NEARBY` / `REGIONAL` / `NO_HISTORY`    |
+| `firms.nearest_fire_km`         | 最近历史火点距离（km），无记录时为 null                                 |
+| `industrial.proximity`          | 最近工业设施距离等级：`WITHIN_500M` / `WITHIN_2KM` / `WITHIN_5KM` / `NONE` |
+| `industrial.is_gas_flare`       | 是否为油气火炬；若为 true，不施加工业惩罚                               |
+| `ground_confidence_breakdown`   | 地面置信度分解：星上置信度 + FIRMS 贡献 + 工业修正                       |
 | `geocoding_address`             | 反向地理编码地址（网络异常时为 null）                                   |
+| `heat_source_classification`    | 8 类热源概率分类结果                                                    |
 | `processing_time_ms`            | 地面增强处理耗时（ms，通常 500~3000ms，取决于网络）                     |
 
 ---
@@ -527,7 +578,7 @@ curl "http://localhost:8001/api/history/nearby?lat=28.5&lon=116.3&radius_deg=0.1
 | `lon`        | float | —     | -180 ~ 180 | 中心点经度（必填）              |
 | `radius_deg` | float | 0.05   | 0 ~ 1.0    | 搜索半径（度），0.05° ≈ 5.5km |
 
-**返回：** 最多 20 条记录，格式同 `/api/history`，按时间倒序排列。
+**返回：** 固定最多 20 条记录（服务端 SQL 限制，无 `limit` 参数），格式同 `/api/history`，按时间倒序排列。
 
 ---
 
@@ -552,27 +603,26 @@ curl "http://localhost:8001/api/history/nearby?lat=28.5&lon=116.3&radius_deg=0.1
 
 适用于已有星上系统输出的场景。
 
-1. 在控制面板顶部选择 **"JSON 输入"** 标签
-2. 将星上系统 `/api/validate` 的完整响应 JSON 粘贴至文本框
-3. 点击 **"提交增强"**
-4. 系统自动提取 `results` 数组发送至 `/api/enhance`
-5. 增强结果显示在右侧地图，点击标记查看详细信息
+1. 将星上系统 `/api/validate` 的完整响应 JSON 粘贴至文本框
+2. 点击 **"开始增强验证"**
+3. 系统自动提取 `results` 数组发送至 `/api/enhance`
+4. 增强结果显示在右侧地图，点击标记查看详细信息
 
 ### 8.3 手动输入模式
 
 适用于快速测试或手动录入坐标的场景。
 
-1. 在控制面板顶部选择 **"手动输入"** 标签
+1. 直接填写手动输入表单
 2. 填写以下字段：
 
-| 字段       | 说明                                   | 示例          |
-| ---------- | -------------------------------------- | ------------- |
-| 纬度       | 火点纬度（必填）                       | `28.5`      |
-| 经度       | 火点经度（必填）                       | `116.3`     |
-| 星上判定   | TRUE_FIRE / UNCERTAIN / FALSE_POSITIVE | `TRUE_FIRE` |
-| 星上置信度 | 0~1 之间的小数                         | `0.84`      |
+| 字段       | 说明                         | 示例     |
+| ---------- | ---------------------------- | -------- |
+| 纬度       | 火点纬度（必填）             | `28.5`   |
+| 经度       | 火点经度（必填）             | `116.3`  |
+| 置信度     | 星上初始/最终置信度（0~100） | `80`     |
+| 采集时间   | 可选，影响后续地面展示       | `2026-03-11T06:00` |
 
-3. 点击 **"提交增强"**，系统以默认值构造星上结果后发送增强请求
+3. 点击 **"开始增强验证"**，系统会构造一个最小星上结果对象后发送增强请求
 
 ### 8.4 地图标记颜色说明
 
@@ -589,57 +639,52 @@ curl "http://localhost:8001/api/history/nearby?lat=28.5&lon=116.3&radius_deg=0.1
 ### 核心公式
 
 ```
-logit(P_ground) = logit(P_satellite) + beta_hist * hist_score - industrial_penalty
+logit(P_ground / 100) = logit(P_satellite / 100) + ln(LR_firms) + Δ_industrial
 ```
 
 各项含义：
 
-| 项                         | 公式                      | 说明                                                |
-| -------------------------- | ------------------------- | --------------------------------------------------- |
-| `logit(P_satellite)`     | `ln(P_sat / (1-P_sat))` | 星上最终置信度转换到 logit 空间，作为地面增强的起点 |
-| `beta_hist * hist_score` | beta=0.3，score∈[-1, 1]  | 历史火点贡献，正值提升，负值降低                    |
-| `industrial_penalty`     | 0 或 0.8                  | 工业设施惩罚，命中则在 logit 空间减去 0.8           |
+| 项                         | 公式 / 取值                                  | 说明                                                |
+| -------------------------- | -------------------------------------------- | --------------------------------------------------- |
+| `logit(P_satellite / 100)` | `ln(P_sat / (1-P_sat))`，其中 `P_sat = final_confidence / 100` | 星上最终置信度转换到 logit 空间，作为地面增强的起点 |
+| `ln(LR_firms)`            | 根据 FIRMS 匹配等级取 `ln(4.0 / 2.5 / 1.5 / 0.5)` | 历史火点贡献；`NO_HISTORY` 也会轻微降低置信度       |
+| `Δ_industrial`            | `-2.5 / -1.5 / -0.8 / +0.3`                  | 工业设施距离对应的 logit 修正；油气火炬不施加惩罚   |
 
-最终通过 sigmoid 映射回 0–1：
-
-```
-P_ground = sigmoid(logit_score) = 1 / (1 + e^(-logit_score))
-```
-
-### 历史火点得分计算
-
-历史得分 `hist_score` 由 FIRMS 查询结果计算：
+最终通过 sigmoid 映射回 0–100：
 
 ```
-hist_score = 0.7 * dist_factor + 0.3 * count_factor
-
-dist_factor  = max(0, 1 - nearest_distance / radius)   # 越近得分越高
-count_factor = min(1, log(1+count) / log(1+20))         # 对数归一化，>20 个时饱和
+P_ground = sigmoid(logit_score) * 100
 ```
 
-- 无历史火点：`hist_score = -0.3`（轻微降低置信度）
-- 半径内有大量近距离火点：`hist_score` 接近 1.0（显著提升置信度）
+### FIRMS 匹配等级
 
-FIRMS 并行查询 3 个数据源（VIIRS SNPP NRT、VIIRS NOAA-20 NRT、MODIS NRT）并合并去重，查询天数上限为 **5 天**（受 FIRMS API 限制，与请求中 `days_back` 参数无关）。
+地面系统不会计算 `hist_score`。实际实现是先查询 FIRMS，再按最近历史火点距离映射到以下等级：
+
+- `EXACT_MATCH`：1km 内有历史火点
+- `NEARBY`：5km 内有历史火点
+- `REGIONAL`：10km 内有历史火点
+- `NO_HISTORY`：10km 内无历史火点
+
+FIRMS 并行查询 3 个数据源（VIIRS SNPP NRT、VIIRS NOAA-20 NRT、MODIS NRT）并合并去重，查询天数上限为 **5 天**。
 
 ### 判定阈值
 
-地面系统使用与星上系统相同的判定阈值：
+地面系统当前实现使用与星上系统一致的 0–100 阈值：
 
 ```
-P_ground >= 0.75  →  TRUE_FIRE      （真实火点）
-P_ground <  0.35  →  FALSE_POSITIVE  （假阳性）
-0.35 <= P_ground < 0.75  →  UNCERTAIN  （待确认）
+P_ground >= 75  →  TRUE_FIRE       （真实火点）
+P_ground <  50  →  FALSE_POSITIVE  （假阳性）
+50 <= P_ground < 75  →  UNCERTAIN  （待确认）
 ```
 
 ### 典型场景示例
 
-| 场景                 | 星上置信度 | 历史得分 | 工业惩罚 | 地面置信度 | 判定      |
-| -------------------- | ---------- | -------- | -------- | ---------- | --------- |
-| 有历史记录的真实火点 | 0.84       | +0.52    | 0        | 0.88       | TRUE_FIRE |
-| 无历史记录的孤立火点 | 0.72       | -0.09    | 0        | 0.70       | UNCERTAIN |
-| 工业区高温热源       | 0.55       | 0        | 0.8      | 0.37       | UNCERTAIN |
-| 工业区 + 有历史记录  | 0.70       | +0.3     | 0.8      | 0.63       | UNCERTAIN |
+| 场景                 | 星上置信度 | FIRMS 等级   | 工业修正 | 地面置信度（示例） | 判定      |
+| -------------------- | ---------- | ------------ | -------- | ------------------ | --------- |
+| 有历史记录的真实火点 | 84.0       | `NEARBY`     | +0.3     | 88.7               | TRUE_FIRE |
+| 无历史记录的孤立火点 | 72.0       | `NO_HISTORY` | +0.3     | 66.6               | UNCERTAIN |
+| 工业区高温热源       | 55.0       | `NO_HISTORY` | -2.5     | 10.7               | FALSE_POSITIVE |
+| 工业区 + 有历史记录  | 70.0       | `NEARBY`     | -0.8     | 72.6               | UNCERTAIN |
 
 ---
 
@@ -675,13 +720,13 @@ curl -I https://firms.modaps.eosdis.nasa.gov/
 
 **可能原因三：该区域确实无历史火点**
 
-系统正常行为，历史得分将为 -0.3（轻微降低置信度）。
+系统正常行为。当前实现会返回 `NO_HISTORY`，并在置信度计算中使用 `GROUND_FIRMS_LR_NO_HISTORY=0.5`，因此会轻微降低置信度。
 
 ---
 
-### 问题：工业设施检测总是返回 `triggered: false`
+### 问题：工业设施检测结果总是显示 `industrial.proximity = NONE`
 
-**可能原因：** OSM Overpass API 超时或返回空结果。
+**可能原因：** OSM Overpass API 超时、返回空结果，或 5km 范围内确实没有工业设施。
 
 ```bash
 # 手动测试 Overpass API
@@ -717,7 +762,7 @@ curl "https://nominatim.openstreetmap.org/reverse?lat=28.5&lon=116.3&format=json
 
 ### 问题：服务启动报 `aiosqlite` 相关错误
 
-**原因：** `aiosqlite` 未安装，或数据目录不存在。
+**原因：** `aiosqlite` 未安装，或数据库目录不可写。默认数据库文件是 `data/fire_ground.db`；代码会在启动时尝试创建表，但不会主动创建缺失的父目录。
 
 ```bash
 # 确认安装
@@ -813,7 +858,7 @@ FIRMS 查询结果缓存于内存（LRU + TTL），TTL 默认 3600 秒（1 小�
 ```bash
 cd fire_ground
 python -m pytest tests/ -v
-# 期望：32 passed
+# 期望：48 passed
 ```
 
 ### 性能基准
