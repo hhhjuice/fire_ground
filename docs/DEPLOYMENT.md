@@ -103,9 +103,9 @@ pip install -r requirements.txt
 python -c "import fastapi, httpx, aiosqlite, pydantic; print('依赖安装成功')"
 ```
 
-### 3.4 创建数据目录
+### 3.4 数据目录
 
-SQLite 数据库将在启动时自动创建并初始化表结构，但当前代码不会主动创建 `GROUND_DB_PATH` 缺失的父目录。首次启动前请确保数据库文件所在目录存在：
+SQLite 数据库父目录、数据库文件和表结构会在启动时自动创建。生产容器部署时仍建议把数据库路径放在持久化数据卷中：
 
 ```bash
 mkdir -p data
@@ -115,7 +115,7 @@ mkdir -p data
 
 ## 4. NASA FIRMS API Key 申请
 
-历史火点查询依赖 NASA FIRMS API Key。默认配置使用 `DEMO_KEY`，**DEMO_KEY 有严格速率限制**，生产环境务必申请正式 Key。
+历史火点查询依赖 NASA FIRMS MAP key。当前实现不从 `.env` 读取固定 key，而是由前端 `FIRE_FIRMS_MAP_KEY` 输入框或 `/api/enhance` 请求体字段 `firms_map_key` 按次提供。未提供 key 时系统会跳过 FIRMS 查询，且不会应用 `NO_HISTORY` 负贡献。
 
 ### 4.1 申请步骤
 
@@ -128,7 +128,6 @@ mkdir -p data
 
 | Key 类型 | 每日请求上限  | 说明                   |
 | -------- | ------------- | ---------------------- |
-| DEMO_KEY | 约 30 次/小时 | 仅供测试，严禁生产使用 |
 | 正式 Key | 无明确限制    | 免费，注册即得         |
 
 ### 4.3 验证 Key 有效性
@@ -153,10 +152,6 @@ cp .env.example .env
 编辑 `.env` 文件：
 
 ```ini
-# ── 必填 / 常用配置 ────────────────────────────────────────
-# NASA FIRMS Map Key（生产环境务必替换 DEMO_KEY）
-GROUND_FIRMS_MAP_KEY=your_firms_map_key_here
-
 # ── FIRMS 匹配等级对应的 LR 配置 ────────────────────────────
 # 地面置信度计算会根据 FIRMS 匹配等级取 ln(LR)
 GROUND_FIRMS_LR_EXACT_MATCH=4.0
@@ -171,20 +166,33 @@ GROUND_INDUSTRIAL_DELTA_WITHIN_2KM=-1.5
 GROUND_INDUSTRIAL_DELTA_WITHIN_5KM=-0.8
 GROUND_INDUSTRIAL_DELTA_NONE=0.3
 
-# ── 缓存配置 ──────────────────────────────────────────────
-# FIRMS 查询结果缓存有效期（秒）
+# ── 缓存工具配置 ──────────────────────────────────────────
+# 内存 TTL/LRU 工具默认有效期（秒）
 GROUND_CACHE_TTL_SECONDS=3600
 
-# 缓存最大条目数（LRU 策略，超出后淘汰最旧条目）
+# 缓存工具最大条目数（LRU 策略，超出后淘汰最旧条目）
 GROUND_CACHE_MAX_SIZE=1000
 
 # ── 数据库配置 ────────────────────────────────────────────
 # SQLite 数据库路径（相对于项目根目录，或绝对路径）
 GROUND_DB_PATH=data/fire_ground.db
 
+# 历史摘要保留天数和坐标网格精度（不保存精确坐标/地址/完整 JSON）
+GROUND_HISTORY_RETENTION_DAYS=15
+GROUND_HISTORY_COORD_PRECISION_DEG=0.1
+
 # ── HTTP 客户端配置 ───────────────────────────────────────
 # 外部 API 请求超时时间（秒）
 GROUND_HTTP_TIMEOUT=10.0
+
+# 外部 API 请求 User-Agent
+GROUND_HTTP_USER_AGENT=FireGroundEnhanceSystem/1.0
+
+# 允许访问前端/API 的浏览器来源，多个来源用英文逗号分隔
+GROUND_CORS_ORIGINS=http://localhost:8001,http://127.0.0.1:8001
+
+# 单次 /api/enhance 最大星上结果数
+GROUND_MAX_BATCH_RESULTS=100
 
 # ── 高级可选覆盖（代码支持，通常无需修改） ────────────────
 GROUND_FIRMS_BASE_URL=https://firms.modaps.eosdis.nasa.gov/api/area/csv
@@ -198,16 +206,17 @@ GROUND_NOMINATIM_URL=https://nominatim.openstreetmap.org/reverse
 
 1. 代码中的默认值
 2. `.env` 文件
-3. 系统环境变量（`export GROUND_FIRMS_MAP_KEY=your_key`）
+3. 系统环境变量（例如 `export GROUND_DB_PATH=/data/fire_ground.db`）
 
 ### 5.4 生产环境注意
 
-`main.py` 中 CORS 设置为 `allow_origins=["*"]`，适用于开发和内网部署。若需对公网开放，建议修改为具体域名：
+`main.py` 从 `GROUND_CORS_ORIGINS` 读取允许的浏览器来源，默认只允许本机访问：
 
-```python
-# app/main.py 中修改
-allow_origins=["https://your-domain.com"]
+```ini
+GROUND_CORS_ORIGINS=http://localhost:8001,http://127.0.0.1:8001
 ```
+
+若需对公网开放，请配置为你的实际 HTTPS 域名，并在反向代理或网关层增加鉴权和限流，不要使用 wildcard CORS。
 
 ---
 
@@ -220,12 +229,13 @@ cd fire_ground
 uvicorn app.main:app --reload --host 0.0.0.0 --port 8001
 ```
 
-### 6.2 生产模式（多 Worker）
+### 6.2 生产模式（单实例）
 
 ```bash
-# 根据 CPU 核数调整 workers
-uvicorn app.main:app --host 0.0.0.0 --port 8001 --workers 4
+uvicorn app.main:app --host 0.0.0.0 --port 8001
 ```
+
+地面端使用本地 SQLite，当前部署目标为单实例低并发服务；不要使用多 worker 或多副本共享同一个 SQLite 文件。
 
 ### 6.3 后台运行（systemd）
 
@@ -242,7 +252,7 @@ User=www-data
 WorkingDirectory=/opt/fire_ground
 EnvironmentFile=/opt/fire_ground/.env
 ExecStart=/opt/fire_ground/.venv/bin/uvicorn app.main:app \
-    --host 0.0.0.0 --port 8001 --workers 2
+    --host 0.0.0.0 --port 8001
 Restart=always
 RestartSec=5
 
@@ -263,10 +273,10 @@ sudo systemctl status fire-ground
 
 特点：
 
-- 镜像只安装运行依赖，不内置项目代码
-- 默认要求将项目目录挂载到 `/workspace/fire_ground`
-- 默认启动命令为单进程 `uvicorn app.main:app --host $HOST --port $PORT`
-- 可通过环境变量覆盖代码目录与入口模块
+- 镜像内置 `app/` 和 `static/`，不再要求挂载源码目录
+- SQLite 数据通过 `/data` 数据卷持久化，默认 `GROUND_DB_PATH=/data/fire_ground.db`
+- 默认启动命令为单进程 `python3 -m uvicorn app.main:app --host $HOST --port $PORT`
+- 镜像内置 `HEALTHCHECK`，调用 `/api/health` 并验证数据库可写
 
 构建示例：
 
@@ -281,7 +291,7 @@ docker build \
 
 ```bash
 docker run --rm -p 8001:8001 \
-  -v "$(pwd)":/workspace/fire_ground \
+  -v fire_ground_data:/data \
   -e HOST=0.0.0.0 \
   -e PORT=8001 \
   fire-ground-runtime
@@ -289,7 +299,7 @@ docker run --rm -p 8001:8001 \
 
 可选覆盖环境变量：
 
-- `CODE_DIR`：代码目录（默认 `/workspace/fire_ground`）
+- `CODE_DIR`：代码目录（默认 `/app`，通常无需覆盖）
 - `APP_MODULE`：ASGI 入口（默认 `app.main:app`）
 - `HOST`：监听地址（默认 `0.0.0.0`）
 - `PORT`：监听端口（默认 `8001`）
@@ -326,6 +336,7 @@ INFO     uvicorn: Application startup complete.
 curl -X POST http://localhost:8001/api/enhance \
   -H "Content-Type: application/json" \
   -d '{
+    "firms_map_key": "YOUR_FIRMS_MAP_KEY",
     "results": [
       {
         "input_point": {
@@ -361,7 +372,7 @@ curl -X POST http://localhost:8001/api/enhance \
         "environmental": {
           "is_daytime": true,
           "solar_zenith_angle": 42.3,
-          "fire_season_factor": 1.2,
+          "fire_season_factor": 1.3,
           "env_score": 0.15,
           "detail": "白天观测，夏季北半球"
         },
@@ -412,9 +423,9 @@ SAT_RESULT=$(curl -s -X POST http://localhost:8000/api/validate \
   -H "Content-Type: application/json" \
   -d '{"points": [{"latitude":30.03039, "longitude":119.74884, "acquisition_time": "2026-03-11T14:30:00Z"}]}')
 
-# 第二步：提取 results 数组，构造地面系统输入
+# 第二步：提取 results 数组，构造地面系统输入；如需 FIRMS 查询则加入 firms_map_key
 GROUND_INPUT=$(echo $SAT_RESULT | python3 -c \
-  "import json,sys; d=json.load(sys.stdin); print(json.dumps({'results': d['results']}))")
+  "import json,sys; d=json.load(sys.stdin); print(json.dumps({'firms_map_key': 'YOUR_FIRMS_MAP_KEY', 'results': d['results']}))")
 
 # 第三步：调用地面系统
 curl -X POST http://localhost:8001/api/enhance \
@@ -442,6 +453,8 @@ curl -X POST http://localhost:8001/api/enhance \
 | `fire_area_m2`          | float\|null | 否   | 星上火点估算面积（m²），地面系统直接透传                     |
 | `processing_time_ms`    | float        | ✅   | 星上处理耗时（ms）                                           |
 
+`firms_map_key` 是请求级可选字段，不会写入数据库、日志或响应。留空时 `firms.status=disabled`，地面置信度不应用 `NO_HISTORY` 负贡献；key 已提供但 FIRMS 查询失败时 `firms.status=failed`，同样不应用负贡献。
+
 **响应示例：**
 
 ```json
@@ -453,11 +466,12 @@ curl -X POST http://localhost:8001/api/enhance \
       "ground_confidence": 88.7,
       "ground_reasons": [
         "地物类型为草地，属于高火灾风险区域",
-        "[地面增强] FIRMS 数据显示5km内近5天有火灾记录",
+        "[地面增强] FIRMS 历史数据显示5km内近5天有火灾记录",
         "[地面增强] 周边未发现工业设施"
       ],
-      "ground_summary": "地面增强分析判定为真实火点，最终置信度88.7%（星上置信度84.0%）。FIRMS 数据显示5km内近5天有火灾记录。",
+      "ground_summary": "地面增强分析判定为真实火点，最终置信度88.7%（星上置信度84.0%）。FIRMS 历史数据显示5km内近5天有火灾记录。",
       "firms": {
+        "status": "success",
         "match_level": "NEARBY",
         "nearest_fire_km": 0.8,
         "nearest_fire_date": "2026-03-10T00:00:00",
@@ -506,6 +520,7 @@ curl -X POST http://localhost:8001/api/enhance \
 | `ground_confidence`             | 地面增强最终置信度（0~100）                                             |
 | `ground_reasons`                | 合并后的原因列表：星上原因 + 地面增强原因（以 `[地面增强]` 前缀区分） |
 | `ground_summary`                | 地面综合摘要                                                            |
+| `firms.status`                  | FIRMS 查询状态：`success` / `disabled` / `failed`                       |
 | `firms.match_level`             | FIRMS 匹配等级：`EXACT_MATCH` / `NEARBY` / `REGIONAL` / `NO_HISTORY`    |
 | `firms.nearest_fire_km`         | 最近历史火点距离（km），无记录时为 null                                 |
 | `industrial.proximity`          | 最近工业设施距离等级：`WITHIN_500M` / `WITHIN_2KM` / `WITHIN_5KM` / `NONE` |
@@ -554,7 +569,7 @@ curl "http://localhost:8001/api/history?limit=500"
 | --------- | ---- | ------ | ------- | ------------ |
 | `limit` | int  | 50     | 1 ~ 500 | 返回记录数量 |
 
-**返回：** 数组，每项包含 `id`、`latitude`、`longitude`、`satellite_verdict`、`satellite_confidence`、`ground_verdict`、`ground_confidence`、`summary`、`result_json`（完整 JSON 字符串）、`created_at`。
+**返回：** 数组，每项只包含摘要字段：`id`、`lat_grid`、`lon_grid`、`satellite_verdict`、`satellite_confidence`、`ground_verdict`、`ground_confidence`、`summary`、`created_at`。历史默认保留 15 天，不保存精确 `latitude/longitude`、反向地理编码地址、完整 `result_json` 或 FIRMS key。
 
 ---
 
@@ -564,7 +579,7 @@ curl "http://localhost:8001/api/history?limit=500"
 
 ```bash
 # 查询 (28.5°N, 116.3°E) 附近 0.05° 范围内的历史记录
-curl "http://localhost:8001/api/history/nearby?lat=28.5&lon=116.3&radius_deg=0.05"
+curl "http://localhost:8001/api/history/nearby?lat=28.5&lon=116.3&radius_deg=0.05&limit=20"
 
 # 扩大搜索范围至 0.1°（约 11km）
 curl "http://localhost:8001/api/history/nearby?lat=28.5&lon=116.3&radius_deg=0.1"
@@ -577,8 +592,9 @@ curl "http://localhost:8001/api/history/nearby?lat=28.5&lon=116.3&radius_deg=0.1
 | `lat`        | float | —     | -90 ~ 90   | 中心点纬度（必填）              |
 | `lon`        | float | —     | -180 ~ 180 | 中心点经度（必填）              |
 | `radius_deg` | float | 0.05   | 0 ~ 1.0    | 搜索半径（度），0.05° ≈ 5.5km |
+| `limit`      | int   | 20     | 1 ~ 100    | 返回记录数量                  |
 
-**返回：** 固定最多 20 条记录（服务端 SQL 限制，无 `limit` 参数），格式同 `/api/history`，按时间倒序排列。
+**返回：** 最多 `limit` 条记录，格式同 `/api/history`，按时间倒序排列。查询中心会先按 `GROUND_HISTORY_COORD_PRECISION_DEG` 映射到低精度网格。
 
 ---
 
@@ -598,6 +614,7 @@ curl "http://localhost:8001/api/history/nearby?lat=28.5&lon=116.3&radius_deg=0.1
 
 - **左侧控制面板**：输入区域，支持两种输入模式切换
 - **右侧地图**：Leaflet 地图，增强完成后在地图上显示火点标记，点击标记查看详情
+- **FIRE_FIRMS_MAP_KEY 输入框**：可选。填写后本次请求启用 FIRMS 历史火点查询；留空则跳过 FIRMS，避免在无 key 或网络受限时错误施加无历史火点负证据。
 
 ### 8.2 JSON 输入模式
 
@@ -647,7 +664,7 @@ logit(P_ground / 100) = logit(P_satellite / 100) + ln(LR_firms) + Δ_industrial
 | 项                         | 公式 / 取值                                  | 说明                                                |
 | -------------------------- | -------------------------------------------- | --------------------------------------------------- |
 | `logit(P_satellite / 100)` | `ln(P_sat / (1-P_sat))`，其中 `P_sat = final_confidence / 100` | 星上最终置信度转换到 logit 空间，作为地面增强的起点 |
-| `ln(LR_firms)`            | 根据 FIRMS 匹配等级取 `ln(4.0 / 2.5 / 1.5 / 0.5)` | 历史火点贡献；`NO_HISTORY` 也会轻微降低置信度       |
+| `ln(LR_firms)`            | 根据 FIRMS 匹配等级取 `ln(4.0 / 2.5 / 1.5 / 0.5)` | 仅 `firms.status=success` 时参与；成功查询且 `NO_HISTORY` 才会轻微降低置信度 |
 | `Δ_industrial`            | `-2.5 / -1.5 / -0.8 / +0.3`                  | 工业设施距离对应的 logit 修正；油气火炬不施加惩罚   |
 
 最终通过 sigmoid 映射回 0–100：
@@ -665,7 +682,7 @@ P_ground = sigmoid(logit_score) * 100
 - `REGIONAL`：10km 内有历史火点
 - `NO_HISTORY`：10km 内无历史火点
 
-FIRMS 并行查询 3 个数据源（VIIRS SNPP NRT、VIIRS NOAA-20 NRT、MODIS NRT）并合并去重，查询天数上限为 **5 天**。
+FIRMS 并行查询 3 个数据源（VIIRS SNPP NRT、VIIRS NOAA-20 NRT、MODIS NRT）并合并去重，查询天数上限为 **5 天**。未提供 key 时状态为 `disabled`；key 已提供但查询失败且无可用结果时状态为 `failed`。这两种状态都不参与 FIRMS 置信度贡献。
 
 ### 判定阈值
 
@@ -703,7 +720,7 @@ curl "https://firms.modaps.eosdis.nasa.gov/api/area/csv/YOUR_KEY/VIIRS_SNPP_NRT/
 # 正常返回 CSV 数据；返回 HTML 错误页说明 Key 无效
 ```
 
-**解决：** 检查 `.env` 中的 `GROUND_FIRMS_MAP_KEY`，确认已填入正式申请的 Key，而非 `DEMO_KEY`。
+**解决：** 检查前端 `FIRE_FIRMS_MAP_KEY` 输入框或 API 请求体 `firms_map_key` 是否填入有效 MAP key；不要把真实 key 写入 `.env`、日志或历史库。
 
 ---
 
@@ -720,7 +737,7 @@ curl -I https://firms.modaps.eosdis.nasa.gov/
 
 **可能原因三：该区域确实无历史火点**
 
-系统正常行为。当前实现会返回 `NO_HISTORY`，并在置信度计算中使用 `GROUND_FIRMS_LR_NO_HISTORY=0.5`，因此会轻微降低置信度。
+系统正常行为。只有在 FIRMS 查询成功时才会返回 `status=success` + `NO_HISTORY`，并在置信度计算中使用 `GROUND_FIRMS_LR_NO_HISTORY=0.5` 轻微降低置信度。未提供 key 或查询失败不会降低置信度。
 
 ---
 
@@ -762,13 +779,13 @@ curl "https://nominatim.openstreetmap.org/reverse?lat=28.5&lon=116.3&format=json
 
 ### 问题：服务启动报 `aiosqlite` 相关错误
 
-**原因：** `aiosqlite` 未安装，或数据库目录不可写。默认数据库文件是 `data/fire_ground.db`；代码会在启动时尝试创建表，但不会主动创建缺失的父目录。
+**原因：** `aiosqlite` 未安装，或数据库目录不可写。默认数据库文件是 `data/fire_ground.db`；代码会自动创建父目录、启用 WAL 和 `busy_timeout`，但运行用户仍必须对数据目录有写权限。
 
 ```bash
 # 确认安装
 pip show aiosqlite
 
-# 确认数据目录存在
+# 确认数据目录可写
 ls -la data/
 ```
 
@@ -777,6 +794,7 @@ ls -la data/
 ```bash
 pip install aiosqlite
 mkdir -p data
+chmod u+rwx data
 ```
 
 ---
@@ -835,39 +853,35 @@ uvicorn app.main:app ... 2>&1 | tee -a /var/log/fire-ground.log
 
 ```bash
 sqlite3 data/fire_ground.db \
-  "SELECT created_at, latitude, longitude, satellite_verdict, ground_verdict, ground_confidence \
+  "SELECT created_at, lat_grid, lon_grid, satellite_verdict, ground_verdict, ground_confidence \
    FROM enhancement_results ORDER BY created_at DESC LIMIT 20;"
 ```
 
-**数据库大小估算：** 每条记录约 2–5 KB（含完整 result_json），每天 1000 次请求约产生 2–5 MB 数据。建议定期归档：
+**数据库大小估算：** 每条记录仅保存低精度网格和判定摘要，不保存完整 JSON。默认启动、每日后台任务和每次写入后会清理超过 `GROUND_HISTORY_RETENTION_DAYS=15` 天的记录；如需手动压缩：
+
+> 升级说明：旧版本 `enhancement_results` 表如包含精确 `latitude`/`longitude` 或完整 `result_json` 字段，启动时会重建为脱敏 schema，并清除旧敏感历史记录。升级前如需保留历史统计，请先导出低精度汇总数据。
 
 ```bash
-# 删除 30 天前的记录并压缩数据库
-sqlite3 data/fire_ground.db "DELETE FROM enhancement_results WHERE created_at < datetime('now', '-30 days');"
+# 删除 15 天前的记录并压缩数据库
+sqlite3 data/fire_ground.db "DELETE FROM enhancement_results WHERE created_at < datetime('now', '-15 days');"
 sqlite3 data/fire_ground.db "VACUUM;"
 ```
-
-### FIRMS 缓存说明
-
-FIRMS 查询结果缓存于内存（LRU + TTL），TTL 默认 3600 秒（1 小时）。同一区域、同一天数内的重复查询直接命中缓存，不发起网络请求。缓存在服务重启后清空。
-
-缓存最大条目数由 `GROUND_CACHE_MAX_SIZE` 控制，超出后按 LRU 策略淘汰最旧条目。
 
 ### 运行测试
 
 ```bash
 cd fire_ground
 python -m pytest tests/ -v
-# 期望：48 passed
+# 期望：65 passed
 ```
 
 ### 性能基准
 
 | 条件              | 典型响应时间 | 说明                     |
 | ----------------- | ------------ | ------------------------ |
-| FIRMS 缓存命中    | 200–500 ms  | OSM + Nominatim 仍需请求 |
 | 全部外部 API 正常 | 800–2500 ms | 三路并行，取最慢者       |
 | 某个 API 超时     | 约 7 秒      | FIRMS 单源 6 秒超时      |
-| 所有外部 API 不通 | < 100 ms     | 全部降级，返回默认值     |
+| 未提供 FIRMS key  | 300–1500 ms | 跳过 FIRMS，仅 OSM + Nominatim |
+| 所有外部 API 不通 | < 100 ms     | 全部降级，FIRMS failed/disabled 不施加负贡献 |
 
 > 地面系统响应时间主要由网络质量决定，与星上系统（本地 GeoTIFF 磁盘读取）特性不同。

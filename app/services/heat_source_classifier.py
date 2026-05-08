@@ -16,6 +16,7 @@ from typing import Optional
 
 from app.api.schemas import (
     FirmsMatchLevel,
+    FirmsQueryStatus,
     FirmsResult,
     IndustrialProximity,
     IndustrialResult,
@@ -110,7 +111,11 @@ def classify_heat_sources(
         fire_season = sat_result.environmental.fire_season_factor
 
     # Ground service results mapped to proxy values
-    hist_score: float = _FIRMS_SCORE.get(firms.match_level, 0.0) if firms else 0.0
+    hist_score: float = (
+        _FIRMS_SCORE.get(firms.match_level, 0.0)
+        if firms and firms.status == FirmsQueryStatus.SUCCESS
+        else 0.0
+    )
     industrial_triggered: bool = (
         industrial.proximity != IndustrialProximity.NONE if industrial else False
     )

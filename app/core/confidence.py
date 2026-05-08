@@ -14,6 +14,7 @@ from typing import Optional
 
 from app.api.schemas import (
     FirmsMatchLevel,
+    FirmsQueryStatus,
     FirmsResult,
     GroundConfidenceBreakdown,
     IndustrialProximity,
@@ -78,7 +79,7 @@ def compute_ground_confidence(
 
     # FIRMS contribution: ln(LR_firms)
     firms_contribution = 0.0
-    if firms is not None:
+    if firms is not None and firms.status == FirmsQueryStatus.SUCCESS:
         lr = _firms_lr(firms.match_level, settings)
         firms_contribution = math.log(lr)
     logit_score += firms_contribution
@@ -104,7 +105,7 @@ def compute_ground_confidence(
 def determine_verdict(confidence: float) -> Verdict:
     """Determine fire point verdict based on ground confidence (0-100 scale).
 
-    Final thresholds (stricter than satellite-only 70/50):
+    Final thresholds, aligned with the satellite stage:
         ≥ 75 → TRUE_FIRE
         < 50 → FALSE_POSITIVE
         [50, 75) → UNCERTAIN

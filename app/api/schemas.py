@@ -9,7 +9,9 @@ from datetime import datetime
 from enum import Enum
 from typing import Optional
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
+
+from app.config import get_settings
 
 
 class Verdict(str, Enum):
@@ -109,6 +111,19 @@ class SatelliteResultInput(BaseModel):
 class EnhanceRequest(BaseModel):
     """Request to enhance one or more satellite validation results."""
     results: list[SatelliteResultInput] = Field(..., min_length=1, description="星上验证结果列表")
+    firms_map_key: Optional[str] = Field(
+        None,
+        description="本次请求使用的 FIRMS MAP key；为空时跳过 FIRMS 历史火点查询",
+    )
+
+    @model_validator(mode="after")
+    def validate_batch_size(self) -> "EnhanceRequest":
+        max_results = get_settings().max_batch_results
+        if len(self.results) > max_results:
+            raise ValueError(f"星上验证结果数量不能超过 {max_results}")
+        if self.firms_map_key is not None:
+            self.firms_map_key = self.firms_map_key.strip() or None
+        return self
 
 
 # ---------------------------------------------------------------------------
@@ -123,8 +138,16 @@ class FirmsMatchLevel(str, Enum):
     NO_HISTORY = "NO_HISTORY"      # 10km内无火点记录
 
 
+class FirmsQueryStatus(str, Enum):
+    """FIRMS query execution status."""
+    SUCCESS = "success"
+    DISABLED = "disabled"
+    FAILED = "failed"
+
+
 class FirmsResult(BaseModel):
     """FIRMS historical fire data match result."""
+    status: FirmsQueryStatus = Field(FirmsQueryStatus.SUCCESS, description="FIRMS 查询状态")
     match_level: FirmsMatchLevel = Field(..., description="FIRMS 时空匹配等级")
     nearest_fire_km: Optional[float] = Field(None, ge=0, description="最近历史火点距离 (km)")
     nearest_fire_date: Optional[datetime] = Field(None, description="最近历史火点日期")

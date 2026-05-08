@@ -19,7 +19,7 @@ async def reverse_geocode(lat: float, lon: float) -> Optional[str]:
         "accept-language": "zh",
         "zoom": 14,
     }
-    headers = {"User-Agent": "FireGroundEnhanceSystem/1.0"}
+    headers = {"User-Agent": settings.http_user_agent}
 
     try:
         async with httpx.AsyncClient(timeout=settings.http_timeout) as client:
@@ -29,7 +29,8 @@ async def reverse_geocode(lat: float, lon: float) -> Optional[str]:
             return data.get("display_name")
     except Exception as exc:
         logger.warning(
-            "Nominatim reverse geocode failed for (%.4f, %.4f): %s",
+            "Nominatim reverse geocode failed near lat=%.2f lon=%.2f: %s",
             lat, lon, exc,
+            exc_info=True,
         )
         return None

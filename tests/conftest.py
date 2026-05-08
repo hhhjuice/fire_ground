@@ -13,7 +13,6 @@ from app.api.schemas import (
 )
 
 # Ensure test env doesn't hit real APIs
-os.environ.setdefault("GROUND_FIRMS_MAP_KEY", "TEST_KEY")
 os.environ.setdefault("GROUND_DB_PATH", "/tmp/test_fire_ground.db")
 
 

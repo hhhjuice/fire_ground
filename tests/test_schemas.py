@@ -8,6 +8,7 @@ from app.api.schemas import (
     SatelliteResultInput,
     Verdict,
 )
+from app.config import get_settings
 
 
 def test_satellite_result_input_accepts_valid_data(mock_satellite_result) -> None:
@@ -18,6 +19,19 @@ def test_satellite_result_input_accepts_valid_data(mock_satellite_result) -> Non
 def test_enhance_request_requires_at_least_one_result() -> None:
     with pytest.raises(ValidationError):
         EnhanceRequest(results=[])
+
+
+def test_enhance_request_rejects_over_limit(mock_satellite_result) -> None:
+    results = [mock_satellite_result] * (get_settings().max_batch_results + 1)
+
+    with pytest.raises(ValidationError):
+        EnhanceRequest(results=results)
+
+
+def test_enhance_request_normalizes_blank_firms_key(mock_satellite_result) -> None:
+    request = EnhanceRequest(results=[mock_satellite_result], firms_map_key="   ")
+
+    assert request.firms_map_key is None
 
 
 def test_verdict_enum_values() -> None:

@@ -10,14 +10,21 @@ WORKDIR /opt/runtime
 COPY requirements.txt /tmp/requirements.txt
 RUN python3 -m pip install --upgrade pip setuptools wheel \
     && python3 -m pip install -r /tmp/requirements.txt \
-    && rm -f /tmp/requirements.txt
+    && rm -f /tmp/requirements.txt \
+    && mkdir -p /app /data \
+    && chown -R 10001:10001 /app /data
 
-COPY docker/start.sh /usr/local/bin/start-fire-ground
-RUN chmod +x /usr/local/bin/start-fire-ground \
-    && mkdir -p /workspace/fire_ground
+ENV GROUND_DB_PATH=/data/fire_ground.db
 
-WORKDIR /workspace/fire_ground
-VOLUME ["/workspace/fire_ground"]
+COPY --chown=10001:10001 app /app/app
+COPY --chown=10001:10001 static /app/static
+COPY --chown=10001:10001 docker/start.sh /usr/local/bin/start-fire-ground
+RUN chmod +x /usr/local/bin/start-fire-ground
+
+WORKDIR /app
+USER 10001:10001
+VOLUME ["/data"]
 EXPOSE 8001
+HEALTHCHECK --interval=30s --timeout=5s --start-period=30s --retries=3 CMD python3 -c "import json, urllib.request; data=json.load(urllib.request.urlopen('http://127.0.0.1:8001/api/health', timeout=3)); raise SystemExit(0 if data.get('services', {}).get('database') else 1)" || exit 1
 
 ENTRYPOINT ["/usr/local/bin/start-fire-ground"]

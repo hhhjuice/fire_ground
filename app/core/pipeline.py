@@ -13,6 +13,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import time
+from typing import Optional
 
 from app.api.schemas import (
     EnhanceResponse,
@@ -32,7 +33,14 @@ from app.utils.reason_generator import generate_ground_reasons, generate_ground_
 logger = logging.getLogger(__name__)
 
 
-async def enhance_single_point(sat_result: SatelliteResultInput) -> GroundEnhancedResult:
+def _exc_info(exc: BaseException) -> tuple[type[BaseException], BaseException, object]:
+    return (type(exc), exc, exc.__traceback__)
+
+
+async def enhance_single_point(
+    sat_result: SatelliteResultInput,
+    firms_map_key: Optional[str] = None,
+) -> GroundEnhancedResult:
     """Enhance a single satellite validation result with ground analysis.
 
     Execution:
@@ -55,20 +63,38 @@ async def enhance_single_point(sat_result: SatelliteResultInput) -> GroundEnhanc
 
     # --- Parallel phase: all ground-only services ---
     firms_result, industrial_result, geocoding_result = await asyncio.gather(
-        get_historical_fires(lat, lon),
+        get_historical_fires(lat, lon, firms_map_key=firms_map_key),
         detect_industrial_heat(lat, lon),
         reverse_geocode(lat, lon),
         return_exceptions=True,
     )
 
     if isinstance(firms_result, BaseException):
-        logger.warning("Historical fire service failed: %s", firms_result)
+        logger.warning(
+            "Historical fire service failed near lat=%.2f lon=%.2f: %s",
+            lat,
+            lon,
+            firms_result,
+            exc_info=_exc_info(firms_result),
+        )
         firms_result = None
     if isinstance(industrial_result, BaseException):
-        logger.warning("Industrial FP detection failed: %s", industrial_result)
+        logger.warning(
+            "Industrial FP detection failed near lat=%.2f lon=%.2f: %s",
+            lat,
+            lon,
+            industrial_result,
+            exc_info=_exc_info(industrial_result),
+        )
         industrial_result = None
     if isinstance(geocoding_result, BaseException):
-        logger.warning("Geocoding service failed: %s", geocoding_result)
+        logger.warning(
+            "Geocoding service failed near lat=%.2f lon=%.2f: %s",
+            lat,
+            lon,
+            geocoding_result,
+            exc_info=_exc_info(geocoding_result),
+        )
         geocoding_result = None
 
     # --- Fusion: compute ground confidence ---
@@ -133,21 +159,32 @@ async def enhance_single_point(sat_result: SatelliteResultInput) -> GroundEnhanc
     )
 
 
-async def enhance_batch(results: list[SatelliteResultInput]) -> EnhanceResponse:
+async def enhance_batch(
+    results: list[SatelliteResultInput],
+    firms_map_key: Optional[str] = None,
+) -> EnhanceResponse:
     """Enhance a batch of satellite results.
 
     Processes all points concurrently using asyncio.gather.
     """
     start_time = time.monotonic()
 
-    tasks = [enhance_single_point(sat_result) for sat_result in results]
+    tasks = [enhance_single_point(sat_result, firms_map_key=firms_map_key) for sat_result in results]
     enhanced = await asyncio.gather(*tasks, return_exceptions=True)
 
     valid_results: list[GroundEnhancedResult] = []
     for i, result in enumerate(enhanced):
         if isinstance(result, BaseException):
-            logger.error("Point %d enhancement failed: %s", i, result)
             sat = results[i]
+            point = sat.input_point
+            logger.error(
+                "Point %d enhancement failed near lat=%.2f lon=%.2f: %s",
+                i,
+                point.latitude,
+                point.longitude,
+                result,
+                exc_info=_exc_info(result),
+            )
             valid_results.append(
                 GroundEnhancedResult(
                     satellite_result=sat,

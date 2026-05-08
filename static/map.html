@@ -562,6 +562,11 @@
                 <input type="datetime-local" id="acq_time" class="form-control">
             </div>
 
+            <div class="form-group">
+                <label>FIRE_FIRMS_MAP_KEY (可选)</label>
+                <input type="password" id="firmsKey" class="form-control" autocomplete="off" placeholder="留空则跳过 FIRMS 历史火点查询">
+            </div>
+
             <div class="btn-group">
                 <button id="btn-submit" class="btn btn-primary" onclick="submitEnhance()">开始增强验证</button>
                 <button class="btn btn-outline" onclick="fillDemo()">批量示例</button>
@@ -667,6 +672,7 @@
             const jsonInput = document.getElementById('jsonInput').value.trim();
             
             let requestBody = { results: [] };
+            const firmsKey = document.getElementById('firmsKey').value.trim();
             
             if (jsonInput) {
                 try {
@@ -712,6 +718,12 @@
                 });
             }
 
+            if (firmsKey) {
+                requestBody.firms_map_key = firmsKey;
+            } else {
+                delete requestBody.firms_map_key;
+            }
+
             btnSubmit.disabled = true;
             btnSubmit.innerText = "增强验证中...";
             loading.style.display = "flex";
@@ -732,7 +744,7 @@
                 renderResults(data);
                 
             } catch (error) {
-                resultsContainer.innerHTML = `<div style="color: #e74c3c; padding: 20px;">错误: ${error.message}</div>`;
+                resultsContainer.innerHTML = `<div style="color: #e74c3c; padding: 20px;">错误: ${escapeHtml(error.message)}</div>`;
             } finally {
                 btnSubmit.disabled = false;
                 btnSubmit.innerText = "开始增强验证";
@@ -746,6 +758,16 @@
                 case 'FALSE_POSITIVE': return { label: '误报 (假阳性)', class: 'false-positive', color: '#95a5a6' };
                 default: return { label: '不确定', class: 'uncertain', color: '#f39c12' };
             }
+        }
+
+        function escapeHtml(value) {
+            return String(value ?? '').replace(/[&<>"']/g, (char) => ({
+                '&': '&amp;',
+                '<': '&lt;',
+                '>': '&gt;',
+                '"': '&quot;',
+                "'": '&#39;'
+            }[char]));
         }
 
         function confBarHtml(conf) {
@@ -792,9 +814,9 @@
                 rows.push(`<div class="analysis-row">
                     <span class="row-label">地物类型</span>
                     <span class="row-val">
-                        ${lc.class_name || '-'}
+                        ${escapeHtml(lc.class_name || '-')}
                         <span class="chip ${chipCls}" style="margin-left:4px">似然比 ${lr !== undefined ? lr.toFixed(1) : '-'}</span>
-                        ${lc.description ? `<br><span style="font-size:0.75rem;color:#64748b">${lc.description}</span>` : ''}
+                        ${lc.description ? `<br><span style="font-size:0.75rem;color:#64748b">${escapeHtml(lc.description)}</span>` : ''}
                     </span>
                 </div>`);
             }
@@ -811,7 +833,7 @@
                         ${dayChip}
                         <span class="chip" style="background:#f1f5f9;color:#475569">太阳天顶角 ${env.solar_zenith_angle !== undefined ? env.solar_zenith_angle.toFixed(1) : '-'}°</span>
                         <span class="chip" style="background:#f1f5f9;color:#475569">季节因子 ${env.fire_season_factor !== undefined ? env.fire_season_factor.toFixed(2) : '-'}</span>
-                        ${env.detail ? `<br><span style="font-size:0.75rem;color:#64748b">${env.detail}</span>` : ''}
+                        ${env.detail ? `<br><span style="font-size:0.75rem;color:#64748b">${escapeHtml(env.detail)}</span>` : ''}
                     </span>
                 </div>`);
             }
@@ -821,14 +843,14 @@
             if (fp && fp.flags && fp.flags.length > 0) {
                 const triggered = fp.flags.filter(f => f.triggered);
                 const chips = fp.flags.map(f =>
-                    `<span class="chip ${f.triggered ? 'chip-danger' : 'chip-ok'}">${f.detector}${f.triggered ? ' ⚠' : ' ✓'}</span>`
+                    `<span class="chip ${f.triggered ? 'chip-danger' : 'chip-ok'}">${escapeHtml(f.detector)}${f.triggered ? ' ⚠' : ' ✓'}</span>`
                 ).join('');
                 rows.push(`<div class="analysis-row">
                     <span class="row-label">假阳性检测</span>
                     <span class="row-val">
                         <div class="chip-row">${chips}</div>
                         ${triggered.length > 0
-                            ? `<div style="margin-top:4px;font-size:0.75rem;color:#b91c1c">触发: ${triggered.map(f=>f.detail||f.detector).join('；')}</div>`
+                            ? `<div style="margin-top:4px;font-size:0.75rem;color:#b91c1c">触发: ${triggered.map(f => escapeHtml(f.detail || f.detector)).join('；')}</div>`
                             : ''}
                     </span>
                 </div>`);
@@ -864,7 +886,7 @@
 
             // Reasons
             if (satData.reasons && satData.reasons.length > 0) {
-                const items = satData.reasons.map(r => `<li>${r}</li>`).join('');
+                const items = satData.reasons.map(r => `<li>${escapeHtml(r)}</li>`).join('');
                 rows.push(`<div class="analysis-row">
                     <span class="row-label">判断依据</span>
                     <span class="row-val"><ul class="sub-reasons">${items}</ul></span>
@@ -883,7 +905,7 @@
                 ? `<div style="padding:8px 0 10px;font-size:0.8rem;color:#3730a3;line-height:1.5;border-bottom:1px dashed #c7d2fe;margin-bottom:8px">
                       <span class="sat-badge">星上结论</span>&nbsp;
                       <span class="badge ${satVDetails.class}" style="font-size:0.7rem">${satVDetails.label}</span>&nbsp;
-                      ${satData.summary}
+                      ${escapeHtml(satData.summary)}
                    </div>`
                 : '';
 
@@ -920,7 +942,7 @@
                 const color = HEAT_COLORS[src.type] || '#94a3b8';
                 const isTop = src.type === hsc.top_type;
                 return `<div class="heat-bar-row">
-                    <span class="heat-bar-label" style="${isTop ? 'color:#92400e;font-weight:600' : ''}">${src.label_zh}</span>
+                    <span class="heat-bar-label" style="${isTop ? 'color:#92400e;font-weight:600' : ''}">${escapeHtml(src.label_zh)}</span>
                     <div class="heat-bar-track">
                         <div class="heat-bar-fill" style="width:${pct}%;background:${color};opacity:${isTop ? 1 : 0.55}"></div>
                     </div>
@@ -938,7 +960,7 @@
             return `<div class="analysis-section heat-section">
                 <div class="analysis-section-header" onclick="toggleSection(this)">
                     🌡 热源类型分类
-                    <span style="margin-left:8px;opacity:0.7;font-weight:400;font-size:0.72rem">• ${hsc.top_label_zh} · ${Math.round(hsc.top_probability * 100)}%</span>
+                    <span style="margin-left:8px;opacity:0.7;font-weight:400;font-size:0.72rem">• ${escapeHtml(hsc.top_label_zh)} · ${Math.round(hsc.top_probability * 100)}%</span>
                     <span class="toggle-icon">▲</span>
                 </div>
                 <div class="analysis-section-body">
@@ -958,7 +980,7 @@
             if (res.geocoding_address) {
                 rows.push(`<div class="analysis-row">
                     <span class="row-label">📍 位置</span>
-                    <span class="row-val">${res.geocoding_address}</span>
+                    <span class="row-val">${escapeHtml(res.geocoding_address)}</span>
                 </div>`);
             }
 
@@ -966,10 +988,13 @@
             const firms = res.firms;
             if (firms) {
                 const positiveMatches = ['EXACT_MATCH', 'NEARBY', 'REGIONAL'];
-                const negativeMatches = ['NO_HISTORY'];
-                const isPositive = positiveMatches.includes(firms.match_level);
-                const isNegative = negativeMatches.includes(firms.match_level);
-                const matchChip = isPositive
+                const isPositive = firms.status === 'success' && positiveMatches.includes(firms.match_level);
+                const isNegative = firms.status === 'success' && firms.match_level === 'NO_HISTORY';
+                const matchChip = firms.status === 'disabled'
+                    ? `<span class="chip" style="background:#f1f5f9;color:#64748b">未启用</span>`
+                    : firms.status === 'failed'
+                        ? `<span class="chip chip-warn">查询失败</span>`
+                        : isPositive
                     ? `<span class="chip chip-danger">历史支持</span>`
                     : isNegative
                         ? `<span class="chip chip-ok">历史否定</span>`
@@ -980,7 +1005,7 @@
                     <span class="row-val">
                         ${matchChip}
                         <span style="margin-left:4px">最近: <strong>${distStr}</strong></span>
-                        ${firms.detail ? `<br><span style="font-size:0.75rem;color:#64748b">${firms.detail}</span>` : ''}
+                        ${firms.detail ? `<br><span style="font-size:0.75rem;color:#64748b">${escapeHtml(firms.detail)}</span>` : ''}
                     </span>
                 </div>`);
             }
@@ -999,7 +1024,7 @@
                     <span class="row-label">🏭 工业热源</span>
                     <span class="row-val">
                         <span class="chip ${chipClass}">${chipText}</span>
-                        ${ind.detail ? `<br><span style="font-size:0.75rem;color:#64748b">${ind.detail}</span>` : ''}
+                        ${ind.detail ? `<br><span style="font-size:0.75rem;color:#64748b">${escapeHtml(ind.detail)}</span>` : ''}
                     </span>
                 </div>`);
             }
@@ -1031,7 +1056,7 @@
             // Ground reasons (ground-specific only — prefixed with [地面增强])
             const groundReasons = (res.ground_reasons || []).filter(r => r.includes('[地面增强]'));
             if (groundReasons.length > 0) {
-                const items = groundReasons.map(r => `<li>${r}</li>`).join('');
+                const items = groundReasons.map(r => `<li>${escapeHtml(r)}</li>`).join('');
                 rows.push(`<div class="analysis-row">
                     <span class="row-label">增强依据</span>
                     <span class="row-val"><ul class="sub-reasons">${items}</ul></span>
@@ -1049,7 +1074,7 @@
                 ? `<div style="padding:8px 0 10px;font-size:0.8rem;color:#166534;line-height:1.5;border-bottom:1px dashed #bbf7d0;margin-bottom:8px">
                       <span class="ground-badge">地面结论</span>&nbsp;
                       <span class="badge ${gVDetails.class}" style="font-size:0.7rem">${gVDetails.label}</span>&nbsp;
-                      ${res.ground_summary}
+                      ${escapeHtml(res.ground_summary)}
                    </div>`
                 : '';
 
@@ -1101,7 +1126,7 @@
 
                 const hsc = res.heat_source_classification;
                 const heatChipHtml = hsc
-                    ? `<span class="heat-top-chip">🌡 ${hsc.top_label_zh} ${Math.round(hsc.top_probability * 100)}%</span>`
+                    ? `<span class="heat-top-chip">🌡 ${escapeHtml(hsc.top_label_zh)} ${Math.round(hsc.top_probability * 100)}%</span>`
                     : '';
 
                 card.innerHTML = `
@@ -1111,7 +1136,7 @@
                             <span class="badge ${sVDetails.class}" style="opacity:0.55;margin-left:5px;font-size:0.68rem">星: ${sVDetails.label}</span>
                             <div style="font-size: 0.75rem; color: #7f8c8d; margin-top: 5px;">
                                 ${finalLat.toFixed(4)}, ${finalLon.toFixed(4)}
-                                ${res.geocoding_address ? `&nbsp;·&nbsp;${res.geocoding_address}` : ''}
+                                ${res.geocoding_address ? `&nbsp;·&nbsp;${escapeHtml(res.geocoding_address)}` : ''}
                             </div>
                             ${verdictDiffHtml}
                             ${heatChipHtml}
@@ -1160,13 +1185,13 @@
                         ${res.ground_confidence.toFixed(1)}%
                     </div>
                     <div class="popup-desc" style="margin-bottom:5px">
-                        <span class="ground-badge">地面</span> ${res.ground_summary || ''}
+                        <span class="ground-badge">地面</span> ${escapeHtml(res.ground_summary || '')}
                     </div>
                     <div class="popup-desc">
-                        <span class="sat-badge">星上</span> ${satData.summary || ''}
+                        <span class="sat-badge">星上</span> ${escapeHtml(satData.summary || '')}
                     </div>
-                    ${hsc ? `<div class="popup-meta">🌡 热源: <strong>${hsc.top_label_zh}</strong> ${Math.round(hsc.top_probability * 100)}%${hscAreaStr ? ` &nbsp;·&nbsp; 面积 ${hscAreaStr}` : ''}</div>` : ''}
-                    ${res.geocoding_address ? `<div class="popup-meta">📍 ${res.geocoding_address}</div>` : ''}
+                    ${hsc ? `<div class="popup-meta">🌡 热源: <strong>${escapeHtml(hsc.top_label_zh)}</strong> ${Math.round(hsc.top_probability * 100)}%${hscAreaStr ? ` &nbsp;·&nbsp; 面积 ${hscAreaStr}` : ''}</div>` : ''}
+                    ${res.geocoding_address ? `<div class="popup-meta">📍 ${escapeHtml(res.geocoding_address)}</div>` : ''}
                 `;
                 
                 marker.bindPopup(popupContent);

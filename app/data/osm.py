@@ -19,6 +19,9 @@ async def query_industrial_pois(lat: float, lon: float, radius_m: float = 5000.0
     Coordinates allow the caller to compute exact distances.
     """
     settings = get_settings()
+    lat = float(lat)
+    lon = float(lon)
+    radius_m = int(radius_m)
 
     query = f"""
     [out:json][timeout:10];
@@ -41,7 +44,11 @@ async def query_industrial_pois(lat: float, lon: float, radius_m: float = 5000.0
 
     try:
         async with httpx.AsyncClient(timeout=settings.http_timeout) as client:
-            resp = await client.post(settings.overpass_url, data={"data": query})
+            resp = await client.post(
+                settings.overpass_url,
+                data={"data": query},
+                headers={"User-Agent": settings.http_user_agent},
+            )
             resp.raise_for_status()
             data = resp.json()
 
@@ -80,5 +87,5 @@ async def query_industrial_pois(lat: float, lon: float, radius_m: float = 5000.0
                 )
             return results
     except Exception as e:
-        logger.warning("Overpass query failed for (%.4f, %.4f): %s", lat, lon, e)
+        logger.warning("Overpass query failed near lat=%.2f lon=%.2f: %s", lat, lon, e, exc_info=True)
         return []

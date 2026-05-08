@@ -14,9 +14,9 @@
 ## 置信度流向
 
 ```
-检测接口输出  confidence ∈ [50, 75]
+检测接口输出  confidence ∈ [0, 100]（可选；缺省使用 SAT_INITIAL_CONFIDENCE）
          │
-         │ ÷100 → P₀ ∈ [0.50, 0.75]  →  logit(P₀) ∈ [0, 1.10]
+         │ ÷100 → P₀ ∈ [0, 1]  →  logit(P₀)（内部裁剪避免 ±∞）
          ▼
 ┌──────────────────────────────────────────────────────────┐
 │  Stage 1：星上验证（本项目）                                │
@@ -57,7 +57,7 @@ Pₛ = sigmoid(logit(Pₛ)) × 100
 
 | 参数 | 来源 | 说明 |
 |------|------|------|
-| P₀ | 检测接口 `confidence/100` | 传感器原始置信度，[0.50, 0.75] |
+| P₀ | 检测接口 `confidence/100`，缺省取 `SAT_INITIAL_CONFIDENCE` | 传感器原始置信度，[0, 1] |
 | LR_lc | 本地 GeoTIFF 查询 | ESA WorldCover 地物似然比 |
 | env_score | 纯数学计算 | 太阳角度 + 季节，∈ [-0.5, 0.5] |
 | fp_penalty | 4 种检测器 | 水体/城市/耀光/海岸 |
@@ -171,8 +171,8 @@ P_final = sigmoid(logit(P_final)) × 100
 输入: 70  → logit = 0.847
 星上: 建成区 LR=0.2 (−1.609) + 太阳耀光 (−1.0) = −2.609
   → logit = −1.762  → Pₛ = 14.6%
-地面: 无 FIRMS 历史 (−1.20) + 电厂 <500m (−2.5) = −3.70
-  → logit = −5.462  → P_final ≈ 0.4%  ✓ FALSE_POSITIVE
+地面: 无 FIRMS 历史 (−0.693) + 电厂 <500m (−2.5) = −3.193
+  → logit = −4.955  → P_final ≈ 0.7%  ✓ FALSE_POSITIVE
 ```
 
 ### 场景 D — 偏远草地无历史记录（地物强支持）
@@ -190,16 +190,16 @@ P_final = sigmoid(logit(P_final)) × 100
 
 ## 接口协议
 
-星上系统输出 `SatelliteValidationResult`，地面系统以此为输入计算 `GroundValidationResult`：
+星上系统输出 `SatelliteValidationResult`，地面系统以此为输入计算 `GroundEnhancedResult`：
 
 ```
-SatelliteValidationResult          GroundValidationResult
+SatelliteValidationResult          GroundEnhancedResult
 ─────────────────────────    →    ──────────────────────────────
-final_confidence (0-100)           verdict (TRUE_FIRE/…)
-verdict (初步, 75/50)              final_confidence (0-100)
+final_confidence (0-100)           ground_verdict (TRUE_FIRE/…)
+verdict (初步, 75/50)              ground_confidence (0-100)
 landcover / environmental          firms: FirmsResult
 false_positive                     industrial: IndustrialResult
-confidence_breakdown               confidence_breakdown
+confidence_breakdown               ground_confidence_breakdown
 ```
 
 相关 Schema 定义见 `app/api/schemas.py`，地面阶段计算逻辑见 `app/core/confidence.py`。

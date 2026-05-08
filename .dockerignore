@@ -1,4 +1,8 @@
 *
 !requirements.txt
+!app/
+!app/**
+!static/
+!static/**
 !docker/
 !docker/**

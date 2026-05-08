@@ -6,6 +6,7 @@ from typing import Optional
 
 from app.api.schemas import (
     FirmsMatchLevel,
+    FirmsQueryStatus,
     FirmsResult,
     IndustrialProximity,
     IndustrialResult,
@@ -14,10 +15,10 @@ from app.api.schemas import (
 )
 
 _FIRMS_REASON: dict[FirmsMatchLevel, str] = {
-    FirmsMatchLevel.EXACT_MATCH: "FIRMS 数据显示同位置1km内近5天有火灾记录",
-    FirmsMatchLevel.NEARBY: "FIRMS 数据显示5km内近5天有火灾记录",
-    FirmsMatchLevel.REGIONAL: "FIRMS 数据显示10km内近5天有区域性火灾记录",
-    FirmsMatchLevel.NO_HISTORY: "FIRMS 近5天数据在10km内无火点记录",
+    FirmsMatchLevel.EXACT_MATCH: "FIRMS 历史数据显示同位置1km内近5天有火灾记录",
+    FirmsMatchLevel.NEARBY: "FIRMS 历史数据显示5km内近5天有火灾记录",
+    FirmsMatchLevel.REGIONAL: "FIRMS 历史数据显示10km内近5天有区域性火灾记录",
+    FirmsMatchLevel.NO_HISTORY: "FIRMS 近5天历史数据在10km内无火点记录",
 }
 
 _VERDICT_TEXT: dict[Verdict, str] = {
@@ -46,7 +47,12 @@ def generate_ground_reasons(
     reasons: list[str] = list(satellite_result.reasons)
 
     if firms is not None:
-        reason_text = _FIRMS_REASON.get(firms.match_level, firms.detail)
+        if firms.status == FirmsQueryStatus.DISABLED:
+            reason_text = firms.detail or "未启用 FIRMS 历史火点查询"
+        elif firms.status == FirmsQueryStatus.FAILED:
+            reason_text = firms.detail or "FIRMS 历史火点查询失败，未作为置信度负证据"
+        else:
+            reason_text = _FIRMS_REASON.get(firms.match_level, firms.detail)
         reasons.append(f"[地面增强] {reason_text}")
 
     if industrial is not None:
@@ -75,7 +81,12 @@ def generate_ground_summary(
     )
 
     if firms is not None:
-        reason_text = _FIRMS_REASON.get(firms.match_level, firms.detail)
+        if firms.status == FirmsQueryStatus.DISABLED:
+            reason_text = firms.detail or "未启用 FIRMS 历史火点查询"
+        elif firms.status == FirmsQueryStatus.FAILED:
+            reason_text = firms.detail or "FIRMS 历史火点查询失败，未作为置信度负证据"
+        else:
+            reason_text = _FIRMS_REASON.get(firms.match_level, firms.detail)
         parts.append(f"{reason_text}。")
 
     if industrial is not None:

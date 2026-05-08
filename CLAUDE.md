@@ -36,14 +36,14 @@ Ruff 配置：`pyproject.toml`，Python 3.11，行长 120，规则 E/F/W/I（忽
 | `POST` | `/api/enhance`                                  | 主流水线——接受 `EnhanceRequest`，返回 `EnhanceResponse` |
 | `GET`  | `/api/health`                                   | 健康检查                                                      |
 | `GET`  | `/api/history?limit=50`                         | 查询最近 DB 记录（范围 1–500）                               |
-| `GET`  | `/api/history/nearby?lat=&lon=&radius_deg=0.05` | 按坐标范围查询 DB 记录                                        |
+| `GET`  | `/api/history/nearby?lat=&lon=&radius_deg=0.05&limit=20` | 按低精度坐标网格查询 DB 记录                         |
 | `GET`  | `/static/map.html`                              | Leaflet.js 前端地图                                           |
 
 ## 流水线架构
 
 `enhance_batch` → 并发调用每个火点的 `enhance_single_point`：
 
-1. **并行 I/O 阶段：** `get_historical_fires`（FIRMS）+ `detect_industrial_heat`（OSM Overpass）+ `reverse_geocode`（Nominatim）——通过 `asyncio.gather(return_exceptions=True)` 并发执行，任一服务失败时降级为 `None`，不影响整体流程
+1. **并行 I/O 阶段：** `get_historical_fires`（FIRMS，可选请求级 `firms_map_key`）+ `detect_industrial_heat`（OSM Overpass）+ `reverse_geocode`（Nominatim）——通过 `asyncio.gather(return_exceptions=True)` 并发执行，任一服务失败时降级，不影响整体流程
 2. **融合阶段：** `compute_ground_confidence` → `determine_verdict`
 3. **分类阶段（纯计算，无 I/O）：** `classify_heat_sources` 生成 `HeatSourceClassificationSchema`
 
@@ -52,12 +52,14 @@ Ruff 配置：`pyproject.toml`，Python 3.11，行长 120，规则 E/F/W/I（忽
 ## 置信度模型（`core/confidence.py`）
 
 ```text
-logit(P_地面) = logit(P_卫星) + β_hist × hist_score − industrial_penalty
+logit(P_地面) = logit(P_卫星 / 100) + ln(LR_firms) + Δ_industrial
 ```
 
-- `β_hist = 0.3`（可通过 `GROUND_BETA_HIST` 配置）
-- `industrial_penalty` 来自 `IndustrialFalsePositiveResult.flag.penalty`（默认 `0.8`，可通过 `GROUND_FP_PENALTY_INDUSTRIAL` 配置）
-- 判决阈值**硬编码**：≥ 0.75 → `TRUE_FIRE`，< 0.35 → `FALSE_POSITIVE`（与卫星系统不同，不可通过配置修改）
+- `P_卫星` 是星上输出的 `final_confidence`，使用 0-100 百分制。
+- `LR_firms` 来自 `FirmsMatchLevel` 对应配置：`GROUND_FIRMS_LR_EXACT_MATCH`、`GROUND_FIRMS_LR_NEARBY`、`GROUND_FIRMS_LR_REGIONAL`、`GROUND_FIRMS_LR_NO_HISTORY`。
+- FIRMS 仅在 `status=success` 时参与置信度计算；未提供 key 或查询失败时为中性贡献，不把 `NO_HISTORY` 当负证据。
+- `Δ_industrial` 来自 `IndustrialProximity` 对应配置：`GROUND_INDUSTRIAL_DELTA_WITHIN_500M`、`GROUND_INDUSTRIAL_DELTA_WITHIN_2KM`、`GROUND_INDUSTRIAL_DELTA_WITHIN_5KM`、`GROUND_INDUSTRIAL_DELTA_NONE`。
+- 判决阈值：`≥ 75.0 → TRUE_FIRE`，`< 50.0 → FALSE_POSITIVE`，其余 `UNCERTAIN`。
 
 ## 热源分类器（`services/heat_source_classifier.py`）
 
@@ -77,18 +79,28 @@ logit(P_地面) = logit(P_卫星) + β_hist × hist_score − industrial_penalty
 ## 数据层
 
 - **`data/osm.py`** — Overpass API 客户端，在边界框内查询工业/电力/制造设施
-- **`data/cache.py`** — 基于 `aiosqlite` 的 SQLite 持久化；核心函数：`save_enhancement_result`、`get_recent_enhancements`、`get_nearby_enhancements`
+- **`data/cache.py`** — 基于 `aiosqlite` 的 SQLite 摘要持久化；只保存 15 天低精度 `lat_grid`/`lon_grid` 与判定摘要，不保存精确坐标、地址、完整 JSON 或 FIRMS key
 - **`data/fire_ground.db`** — 首次运行时自动创建
 
 ## 配置项（`app/config.py`，前缀 `GROUND_`）
 
 | 变量                             | 默认值                  | 说明                                                  |
 | -------------------------------- | ----------------------- | ----------------------------------------------------- |
-| `GROUND_FIRMS_MAP_KEY`         | `DEMO_KEY`            | DEMO_KEY 有速率限制，可在 NASA FIRMS 免费申请正式密钥 |
 | `GROUND_DB_PATH`               | `data/fire_ground.db` | SQLite 数据库路径                                     |
-| `GROUND_BETA_HIST`             | `0.3`                 | 历史数据权重                                          |
-| `GROUND_FP_PENALTY_INDUSTRIAL` | `0.8`                 | 工业热源 logit 惩罚值                                 |
+| `GROUND_HISTORY_RETENTION_DAYS` | `15`                 | 历史摘要保留天数                                      |
+| `GROUND_HISTORY_COORD_PRECISION_DEG` | `0.1`          | 历史坐标网格精度（度）                                |
+| `GROUND_FIRMS_LR_EXACT_MATCH`  | `4.0`                 | FIRMS 1km 内命中似然比                                |
+| `GROUND_FIRMS_LR_NEARBY`       | `2.5`                 | FIRMS 5km 内命中似然比                                |
+| `GROUND_FIRMS_LR_REGIONAL`     | `1.5`                 | FIRMS 10km 内命中似然比                               |
+| `GROUND_FIRMS_LR_NO_HISTORY`   | `0.5`                 | FIRMS 无记录似然比                                    |
+| `GROUND_INDUSTRIAL_DELTA_WITHIN_500M` | `-2.5`        | 工业设施 500m 内 logit 修正                           |
+| `GROUND_INDUSTRIAL_DELTA_WITHIN_2KM`  | `-1.5`        | 工业设施 2km 内 logit 修正                            |
+| `GROUND_INDUSTRIAL_DELTA_WITHIN_5KM`  | `-0.8`        | 工业设施 5km 内 logit 修正                            |
+| `GROUND_INDUSTRIAL_DELTA_NONE` | `0.3`                 | 附近无工业设施 logit 修正                             |
 | `GROUND_HTTP_TIMEOUT`          | `10.0`                | HTTP 超时（秒），适用于 FIRMS、Overpass、Nominatim    |
+| `GROUND_HTTP_USER_AGENT`       | `FireGroundEnhanceSystem/1.0` | 外部 API 请求 User-Agent                     |
+| `GROUND_CORS_ORIGINS`          | `http://localhost:8001,http://127.0.0.1:8001` | 允许的浏览器来源，逗号分隔 |
+| `GROUND_MAX_BATCH_RESULTS`     | `100`                 | 单次增强最大结果数                                    |
 | `GROUND_CACHE_TTL_SECONDS`     | `3600`                | 内存缓存过期时间                                      |
 | `GROUND_CACHE_MAX_SIZE`        | `1000`                | 内存缓存最大条目数                                    |
 

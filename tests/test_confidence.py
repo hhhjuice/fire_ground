@@ -5,6 +5,7 @@ import pytest
 
 from app.api.schemas import (
     FirmsMatchLevel,
+    FirmsQueryStatus,
     FirmsResult,
     IndustrialProximity,
     IndustrialResult,
@@ -51,6 +52,23 @@ def test_firms_no_history_decreases_confidence() -> None:
         firms=firms,
     )
     assert lowered_conf < base_conf
+
+
+@pytest.mark.parametrize("status", [FirmsQueryStatus.DISABLED, FirmsQueryStatus.FAILED])
+def test_firms_disabled_or_failed_is_neutral(status: FirmsQueryStatus) -> None:
+    """Skipped or failed FIRMS query must not apply the no-history penalty."""
+    firms = FirmsResult(
+        status=status,
+        match_level=FirmsMatchLevel.NO_HISTORY,
+        nearest_fire_km=None,
+        nearest_fire_date=None,
+        detail="",
+    )
+
+    conf, bd = compute_ground_confidence(satellite_confidence=65.0, firms=firms)
+
+    assert conf == pytest.approx(65.0, abs=0.1)
+    assert bd.firms_contribution == 0.0
 
 
 def test_industrial_within_500m_decreases_confidence(industrial_result) -> None:
